@@ -17,7 +17,10 @@ conda activate 3d_perception
 | 2026-03-08 | PETR | N/A (workspace not git-initialized) | completed (forward + intermediate tensor checks) | `pytorch_implementation/petr/` | `tests/petr/test_intermediate_tensors.py` | `study/petr_paper_to_code.md` | `papers/PETR.pdf` | Pure-PyTorch PETR forward path onboarded with geometry-aware positional embedding and decoder-stage tensor validation. |
 | 2026-03-08 | MapTR | detached@ff1c2db | completed (forward + intermediate tensor checks) | `pytorch_implementation/maptr/` | `tests/maptr/test_intermediate_tensors.py` | `study/maptr_paper_to_code.md` | `papers/MapTR.pdf` | Pure-PyTorch MapTR forward path onboarded with hierarchical instance-point queries, BEV token encoding, and intermediate tensor validation. |
 | 2026-03-08 | PolarFormer | `HEAD` (detached) | completed (forward + intermediate tensor checks) | `pytorch_implementation/polarformer/` | `tests/polarformer/test_intermediate_tensors.py` | `study/polarformer_paper_to_code.md` | `papers/PolarFormer.pdf` | Pure-PyTorch PolarFormer-lite forward path onboarded with polar ray projection, multi-level decoder outputs, and finite/shape validation. |
+<<<<<<< HEAD
 | 2026-03-08 | sparse4d | master | completed (forward + intermediate tensor checks) | `pytorch_implementation/sparse4d/` | `tests/sparse4d/test_intermediate_tensors.py` | `study/sparse4d_paper_to_code.md` | `papers/Sparse4D.pdf` | Pure-PyTorch Sparse4D-style forward path onboarded from upstream reference patterns; no MMDet3D/MMCV runtime dependency. |
+=======
+>>>>>>> main
 
 ## Entry Template
 
