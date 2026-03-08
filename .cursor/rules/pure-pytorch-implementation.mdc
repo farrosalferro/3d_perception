@@ -1,0 +1,13 @@
+---
+description: Standards for pure PyTorch model implementation modules.
+globs: pytorch_implementation/**/*.py
+alwaysApply: false
+---
+
+# Pure PyTorch Implementation Rules
+
+- Do not add MMDet3D/MMCV runtime dependencies in reimplementation modules.
+- Prefer explicit tensor shapes in docstrings or comments for non-trivial transforms.
+- Keep module boundaries close to paper blocks when feasible.
+- Favor readable math-faithful code over framework-specific abstractions.
+- Keep naming consistent with study docs and tests.

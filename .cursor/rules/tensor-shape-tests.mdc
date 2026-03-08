@@ -1,0 +1,15 @@
+---
+description: Standards for intermediate tensor validation tests.
+globs: tests/**/*.py
+alwaysApply: false
+---
+
+# Tensor Shape Test Rules
+
+- Include intermediate tensor hooks for major backbone, encoder, decoder, and head blocks.
+- Assert expected tensor dimensions at critical boundaries.
+- Assert finite values for intermediate and final outputs.
+- Use compact debug configs so tests run quickly.
+- Include run guidance with:
+  - `conda activate 3d_perception`
+  - `pytest tests/<model> -q`

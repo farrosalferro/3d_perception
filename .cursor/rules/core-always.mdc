@@ -1,0 +1,12 @@
+---
+description: Core standards for pure-PyTorch model study workflow.
+alwaysApply: true
+---
+
+# Core Workflow Standards
+
+- Use `conda activate 3d_perception` before proposing run/test commands.
+- Keep educational implementations under `pytorch_implementation/`.
+- Treat `repos/` as reference lineage, not runtime dependency.
+- Require per-model deliverables: implementation, tests, and study doc.
+- Update `progress.md` for every major milestone.

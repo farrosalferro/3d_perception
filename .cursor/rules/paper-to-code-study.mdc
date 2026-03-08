@@ -1,0 +1,18 @@
+---
+description: Structure and consistency rules for paper-to-code study notes.
+globs: study/**/*.md
+alwaysApply: false
+---
+
+# Paper-to-Code Study Rules
+
+- For each major section, include:
+  - goal
+  - paper concept/equation
+  - symbol table
+  - code mapping
+  - tensor shape notes
+  - one sanity check
+- Keep equation IDs stable and referenced consistently.
+- Use canonical model paths that match implementation and tests.
+- Prefer concise technical explanations tied to concrete tensors.
