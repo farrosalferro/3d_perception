@@ -15,7 +15,7 @@ conda activate 3d_perception
 |---|---|---|---|---|---|---|---|---|
 | 2026-03-08 | BEVFormer | N/A (workspace not git-initialized) | completed (forward + intermediate tensor checks) | `pytorch_implementation/bevformer/` | `tests/bevformer.py` | `study/bevformer_paper_to_code.md` | `papers/BEVFormer.pdf` (if present) | Baseline reference for future model onboarding. |
 | 2026-03-08 | PETR | N/A (workspace not git-initialized) | completed (forward + intermediate tensor checks) | `pytorch_implementation/petr/` | `tests/petr/test_intermediate_tensors.py` | `study/petr_paper_to_code.md` | `papers/PETR.pdf` | Pure-PyTorch PETR forward path onboarded with geometry-aware positional embedding and decoder-stage tensor validation. |
-| 2026-03-08 | MapTR | N/A (workspace not git-initialized) | planned | `pytorch_implementation/maptr/` (planned) | `tests/maptr/` (planned) | `study/maptr_paper_to_code.md` (planned) | `papers/MapTR*.pdf` (planned) | Second pilot after PETR workflow refinement. |
+| 2026-03-08 | MapTR | detached@ff1c2db | completed (forward + intermediate tensor checks) | `pytorch_implementation/maptr/` | `tests/maptr/test_intermediate_tensors.py` | `study/maptr_paper_to_code.md` | `papers/MapTR.pdf` | Pure-PyTorch MapTR forward path onboarded with hierarchical instance-point queries, BEV token encoding, and intermediate tensor validation. |
 
 ## Entry Template
 
