@@ -14,7 +14,7 @@ conda activate 3d_perception
 | Date | Model | Branch | Status | Implementation | Tests | Study Doc | Paper | Notes |
 |---|---|---|---|---|---|---|---|---|
 | 2026-03-08 | BEVFormer | N/A (workspace not git-initialized) | completed (forward + intermediate tensor checks) | `pytorch_implementation/bevformer/` | `tests/bevformer.py` | `study/bevformer_paper_to_code.md` | `papers/BEVFormer.pdf` (if present) | Baseline reference for future model onboarding. |
-| 2026-03-08 | PETR / PETRv2 | N/A (workspace not git-initialized) | planned | `pytorch_implementation/petr/` (planned) | `tests/petr/` (planned) | `study/petr_paper_to_code.md` (planned) | `papers/PETR*.pdf` (planned) | Next target model for first pilot pass. |
+| 2026-03-08 | PETR | N/A (workspace not git-initialized) | completed (forward + intermediate tensor checks) | `pytorch_implementation/petr/` | `tests/petr/test_intermediate_tensors.py` | `study/petr_paper_to_code.md` | `papers/PETR.pdf` | Pure-PyTorch PETR forward path onboarded with geometry-aware positional embedding and decoder-stage tensor validation. |
 | 2026-03-08 | MapTR | N/A (workspace not git-initialized) | planned | `pytorch_implementation/maptr/` (planned) | `tests/maptr/` (planned) | `study/maptr_paper_to_code.md` (planned) | `papers/MapTR*.pdf` (planned) | Second pilot after PETR workflow refinement. |
 
 ## Entry Template
