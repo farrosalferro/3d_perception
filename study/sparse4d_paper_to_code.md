@@ -56,6 +56,7 @@ Bind Sparse4D high-level pipeline to concrete module calls.
 
 ### Explicit equations
 `(E0.1)` Forward path:
+
 $$
 F_t = \mathrm{ImageEncoder}(I_t),\;
 (Q_t, A_t) = \mathrm{InstanceBank}(),\;
@@ -63,6 +64,7 @@ F_t = \mathrm{ImageEncoder}(I_t),\;
 $$
 
 `(E0.2)` Layer-wise outputs:
+
 $$
 \hat{Y} = \{(\hat{c}_l, \hat{b}_l)\}_{l=1}^{L}
 $$
@@ -83,6 +85,7 @@ Map multi-camera image flattening and multi-level feature construction.
 
 ### Explicit equations
 `(E1.1)` Camera-batch flattening:
+
 $$
 I_t \in \mathbb{R}^{B\times N_{cam}\times 3\times H\times W}
 \rightarrow
@@ -90,6 +93,7 @@ I'_t \in \mathbb{R}^{(B\cdot N_{cam})\times 3\times H\times W}
 $$
 
 `(E1.2)` Multi-level features with camera reshape:
+
 $$
 F'_t{}^{(k)} \in \mathbb{R}^{(B\cdot N_{cam})\times C\times H_k\times W_k}
 \rightarrow
@@ -112,12 +116,14 @@ Connect Sparse4D sparse query initialization to concrete tensors.
 
 ### Explicit equations
 `(E2.1)` Learnable sparse instance state:
+
 $$
 Q_t = \mathrm{Repeat}(Q_0, B),\;
 A_t = \mathrm{Repeat}(A_0, B)
 $$
 
 `(E2.2)` Anchor encoding:
+
 $$
 E(A_t) = \mathrm{MLP}(A_t)
 $$
@@ -139,11 +145,13 @@ Map per-layer Sparse4D update blocks to the implemented decoder.
 
 ### Explicit equations
 `(E3.1)` Query initialization:
+
 $$
 H_0 = Q_t + E(A_t)
 $$
 
 `(E3.2)` Decoder layer update:
+
 $$
 H_l = \mathrm{FFN}\Big(\mathrm{CrossAgg}(\mathrm{SelfAttn}(H_{l-1}, H_{l-1}, H_{l-1}), F_t)\Big)
 $$
@@ -165,6 +173,7 @@ Map query states to class logits, box refinement, and final top-k decode.
 
 ### Explicit equations
 `(E4.1)` Per-layer predictions:
+
 $$
 \hat{c}_l = f_{cls}(H_l),\;
 \Delta b_l = f_{reg}(H_l),\;
@@ -172,11 +181,13 @@ $$
 $$
 
 `(E4.2)` Iterative anchor update:
+
 $$
 A_l = \mathrm{stopgrad}(\hat{b}_l)
 $$
 
 `(E4.3)` NMS-free top-k decode:
+
 $$
 (\mathrm{score}, \mathrm{label}, \mathrm{box}) =
 \mathrm{TopK}(\sigma(\hat{c}_L), \hat{b}_L)

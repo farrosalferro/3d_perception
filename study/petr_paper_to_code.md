@@ -59,11 +59,13 @@ PETR performs object-query decoding from multi-view image memory with 3D positio
 
 ### Explicit equations
 `(E0.1)` Feature extraction and decoding:
+
 $$
 F_t = \mathrm{ImageEncoder}(I_t), \quad H = \mathrm{Decoder}(Q, F_t, P), \quad \hat{Y} = \mathrm{Head}(H)
 $$
 
 `(E0.2)` Layer-wise outputs:
+
 $$
 \hat{Y} = \{(\hat{c}_l, \hat{b}_l)\}_{l=1}^{L}
 $$
@@ -99,6 +101,7 @@ Each camera image is processed by shared CNN weights, then fused as a multi-view
 
 ### Explicit equations
 `(E1.1)` Camera-batch flattening:
+
 $$
 I_t \in \mathbb{R}^{B\times N_{cam}\times 3\times H\times W}
 \rightarrow
@@ -106,6 +109,7 @@ I'_t \in \mathbb{R}^{(B\cdot N_{cam})\times 3\times H\times W}
 $$
 
 `(E1.2)` Feature reshape back to camera axis:
+
 $$
 F'_t \in \mathbb{R}^{(B\cdot N_{cam})\times C\times H_f\times W_f}
 \rightarrow
@@ -140,16 +144,19 @@ Image-grid points with sampled depths are lifted through inverse camera projecti
 
 ### Explicit equations
 `(E2.1)` Pixel-depth homogeneous point:
+
 $$
 \tilde{p}(u,v,d) = [u\cdot d, v\cdot d, d, 1]^T
 $$
 
 `(E2.2)` Lift to 3D (lidar/world frame proxy):
+
 $$
 p_{3d} = T^{-1}_{lidar2img}\,\tilde{p}
 $$
 
 `(E2.3)` Range normalization:
+
 $$
 \bar{p}_{3d} = \frac{p_{3d} - p_{min}}{p_{max} - p_{min}}
 $$
@@ -184,11 +191,13 @@ PETR uses learnable 3D reference points and sinusoidal embedding to parameterize
 
 ### Explicit equations
 `(E3.1)` Learnable reference points:
+
 $$
 r_q \in \mathbb{R}^{Q\times 3}
 $$
 
 `(E3.2)` Query embedding:
+
 $$
 e_q = \mathrm{MLP}(\mathrm{PE}_{3d}(r_q))
 $$
@@ -222,11 +231,13 @@ PETR decodes object tokens using decoder layers: self-attention, cross-attention
 
 ### Explicit equations
 `(E4.1)` Memory flattening:
+
 $$
 M \in \mathbb{R}^{(N_{cam}H_fW_f)\times B\times C}
 $$
 
 `(E4.2)` Decoder layer update:
+
 $$
 H_l = \mathrm{FFN}(\mathrm{CrossAttn}(\mathrm{SelfAttn}(H_{l-1})))
 $$
@@ -259,20 +270,24 @@ Each decoder layer predicts class scores and box parameters; center dimensions t
 
 ### Explicit equations
 `(E5.1)` Per-layer predictions:
+
 $$
 \hat{c}_l = f_{cls}(H_l), \quad \hat{b}_l = f_{reg}(H_l)
 $$
 
 `(E5.2)` Reference-aware center update:
+
 $$
 \hat{x},\hat{y}=\sigma(\Delta_{xy}+\sigma^{-1}(r_{xy})), \quad
 \hat{z}=\sigma(\Delta_{z}+\sigma^{-1}(r_{z}))
 $$
 
 `(E5.3)` Scale normalized centers to metric range:
+
 $$
 x = \hat{x}(x_{max}-x_{min}) + x_{min}
 $$
+
 and similarly for `y, z`.
 
 ### Symbol table (E5.*)

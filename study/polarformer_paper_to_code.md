@@ -66,11 +66,13 @@ PolarFormer projects multi-camera image features to polar BEV features, then dec
 
 ### Explicit equations
 `(E0.1)` Camera feature extraction and polar projection:
+
 $$
 F_t = \mathrm{PolarNeck}(\mathrm{ImageEncoder}(I_t))
 $$
 
 `(E0.2)` Query decoding and prediction:
+
 $$
 H = \mathrm{Decoder}(Q, F_t), \quad \hat{Y} = \{(\hat{c}_l, \hat{b}_l)\}_{l=1}^{L}
 $$
@@ -95,16 +97,19 @@ PolarFormer uses image columns as keys/values and polar rays as queries to build
 
 ### Explicit equations
 `(E1.1)` Image column tokens:
+
 $$
 X_i \in \mathbb{R}^{H \times (B\cdot W) \times C}
 $$
 
 `(E1.2)` Polar ray queries and cross-attention:
+
 $$
 R_i = \mathrm{CrossAttn}(Q_{polar}, X_i, X_i)
 $$
 
 `(E1.3)` Camera fusion:
+
 $$
 R = \frac{1}{N_{cam}}\sum_{i=1}^{N_{cam}} R_i
 $$
@@ -132,16 +137,19 @@ Flatten all polar levels into one memory bank and decode object queries with sel
 
 ### Explicit equations
 `(E2.1)` Multi-level flatten:
+
 $$
 M = \mathrm{Concat}_l(\mathrm{Flatten}(F_l))
 $$
 
 `(E2.2)` Decoder layer update:
+
 $$
 H_l = \mathrm{FFN}(\mathrm{CrossAttn}(\mathrm{SelfAttn}(H_{l-1}), M))
 $$
 
 `(E2.3)` Reference points from query positional part:
+
 $$
 r_q = \sigma(W_r q_{pos})
 $$
@@ -170,18 +178,21 @@ The head predicts normalized polar angle/radius and height, then converts `(thet
 
 ### Explicit equations
 `(E3.1)` Reference-aware normalized updates:
+
 $$
 \hat{\theta}, \hat{r} = \sigma(\Delta_{\theta r} + \sigma^{-1}(r_{\theta r})), \quad
 \hat{z} = \sigma(\Delta_z + \sigma^{-1}(r_z))
 $$
 
 `(E3.2)` Scale to metric polar coordinates:
+
 $$
 \theta = 2\pi\hat{\theta}, \quad
 r = \hat{r}(r_{max} - r_{min}) + r_{min}
 $$
 
 `(E3.3)` Polar-to-Cartesian center conversion:
+
 $$
 x = r\sin(\theta), \quad y = r\cos(\theta)
 $$

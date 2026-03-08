@@ -71,10 +71,13 @@ Create a map from paper notation and equations to concrete tensors in your imple
 
 ### Explicit equations
 `(E0.1)` End-to-end feature generation and prediction:
+
 $$
 B_t = \mathrm{Encoder}(Q_t, F_t, B_{t-1}), \quad \hat{Y}_t = \mathrm{Head}(B_t)
 $$
+
 `(E0.2)` Query and image-feature set definition:
+
 $$
 Q_t \in \mathbb{R}^{(H \cdot W)\times C}, \quad F_t=\{F_t^i\}_{i=1}^{N_{cam}}
 $$
@@ -123,11 +126,14 @@ This is pre-transformer image encoding (`F_t^i` per camera).
 
 ### Explicit equations
 `(E1.1)` Conv output spatial size:
+
 $$
 H_{out} = \left\lfloor \frac{H + 2p - k}{s} \right\rfloor + 1,\quad
 W_{out} = \left\lfloor \frac{W + 2p - k}{s} \right\rfloor + 1
 $$
+
 `(E1.2)` Camera-batch flatten and reshape:
+
 $$
 \mathrm{img\_flat} \in \mathbb{R}^{(B\cdot N_{cam})\times 3\times H\times W}
 \rightarrow
@@ -189,10 +195,13 @@ Understand what is fed into the BEV transformer before attention starts.
 
 ### Explicit equations
 `(E2.1)` BEV query initialization in code:
+
 $$
 Q_0 = E_{bev} + PE_{bev} + \mathbf{1}_{use\_can\_bus}\cdot \mathrm{MLP}(can\_bus)
 $$
+
 `(E2.2)` Tensor shapes:
+
 $$
 E_{bev}\in\mathbb{R}^{HW\times C},\quad PE_{bev}\in\mathbb{R}^{HW\times B\times C}
 $$
@@ -250,18 +259,25 @@ Connect BEV grid cells to image-plane sampling locations.
 
 ### Explicit equations
 `(E3.1)` BEV grid to world coordinates (paper Eq. 3):
+
 $$
 x' = (x - \tfrac{W}{2})\cdot s,\quad y' = (y - \tfrac{H}{2})\cdot s
 $$
+
 `(E3.2)` Projection to camera image (paper Eq. 4):
+
 $$
 z_{ij}\,[u_{ij}, v_{ij}, 1]^T = T_i [x', y', z'_j, 1]^T
 $$
+
 `(E3.3)` Code-side image normalization:
+
 $$
 u^{norm} = \frac{u}{W_{img}},\quad v^{norm} = \frac{v}{H_{img}}
 $$
+
 `(E3.4)` Validity mask in code:
+
 $$
 mask = (z>\epsilon)\wedge(0<u^{norm}<1)\wedge(0<v^{norm}<1)
 $$
@@ -325,13 +341,17 @@ Understand how current BEV state is fused with previous BEV memory.
 
 ### Explicit equations
 `(E4.1)` Temporal self-attention (paper Eq. 5 style):
+
 $$
 \mathrm{TSA}(Q_p,\{Q,B'_{t-1}\}) = \sum_{V\in\{Q,B'_{t-1}\}} \mathrm{DeformAttn}(Q_p, p, V)
 $$
+
 `(E4.2)` Sampling location for normalized 2D reference points:
+
 $$
 \mathrm{sampling\_locations} = r + \frac{\Delta p}{[W_l, H_l]}
 $$
+
 where `r` is `reference_points` and `\Delta p` are learned offsets.
 
 ### Symbol table (E4.*)
@@ -389,11 +409,14 @@ Understand how each BEV query gathers evidence from multiple cameras efficiently
 
 ### Explicit equations
 `(E5.1)` Spatial cross-attention aggregation (paper Eq. 2):
+
 $$
 \mathrm{SCA}(Q_p, F_t) = \frac{1}{|V_{hit}|}\sum_{i\in V_{hit}} \sum_{j=1}^{N_{ref}}
 \mathrm{DeformAttn}(Q_p, P(p,i,j), F_t^i)
 $$
+
 `(E5.2)` Deformable attention kernel form:
+
 $$
 \mathrm{DeformAttn}(q,p,x)=\sum_{h=1}^{N_h}\sum_{k=1}^{N_k} A_{h,k}\,x(p+\Delta p_{h,k})
 $$
@@ -461,14 +484,19 @@ Per encoder layer:
 ### Explicit equations
 Let `l` be encoder layer index:
 `(E6.1)` Temporal update:
+
 $$
 \tilde{B}^{(l)} = \mathrm{LN}(\mathrm{TSA}(B^{(l)}))
 $$
+
 `(E6.2)` Spatial update:
+
 $$
 \hat{B}^{(l)} = \mathrm{LN}(\mathrm{SCA}(\tilde{B}^{(l)}, F_t))
 $$
+
 `(E6.3)` FFN refinement:
+
 $$
 B^{(l+1)} = \mathrm{LN}(\mathrm{FFN}(\hat{B}^{(l)}))
 $$
@@ -523,15 +551,20 @@ Detection head follows Deformable DETR-style query decoding with iterative refer
 ### Explicit equations
 Decoder reference refinement per layer `l`:
 `(E7.1)` XY reference update:
+
 $$
 r^{(l+1)}_{xy} = \sigma\left(\Delta^{(l)}_{xy} + \sigma^{-1}(r^{(l)}_{xy})\right)
 $$
+
 `(E7.2)` Z reference update:
+
 $$
 r^{(l+1)}_{z} = \sigma\left(\Delta^{(l)}_{z} + \sigma^{-1}(r^{(l)}_{z})\right)
 $$
+
 Head metric-space conversion:
 `(E7.3)` Coordinate denormalization to metric space:
+
 $$
 x = \hat{x}(x_{max}-x_{min}) + x_{min},\quad
 y = \hat{y}(y_{max}-y_{min}) + y_{min},\quad
@@ -596,12 +629,15 @@ Understand predicted box code semantics and final filtering.
 ### Explicit equations
 From code representation to metric box:
 `(E8.1)` Rotation and size decode:
+
 $$
 \theta = \operatorname{atan2}(\sin\theta, \cos\theta),\quad
 w = e^{\hat{w}},\ l = e^{\hat{l}},\ h = e^{\hat{h}}
 $$
+
 Top-k class selection:
 `(E8.2)` Class-score flatten + top-k:
+
 $$
 scores, idx = \mathrm{topk}(\sigma(cls), K),\quad label = idx \bmod N_{class}
 $$
@@ -661,9 +697,11 @@ Whole pipeline: multi-camera features + temporal memory -> BEV memory -> object 
 ### Explicit equations
 Compact full pipeline:
 `(E9.1)` Full forward map:
+
 $$
 \hat{Y}_t = \mathrm{Decode}\Big(\mathrm{Head}\big(\mathrm{Encoder}(Q_t, F_t, B_{t-1})\big)\Big)
 $$
+
 where `Decode` is NMS-free top-k + range filtering in this repo.
 
 ### Symbol table (E9.*)

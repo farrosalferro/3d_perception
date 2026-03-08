@@ -63,6 +63,7 @@ Bind StreamPETR high-level temporal pipeline to concrete module calls.
 
 ### Explicit equations
 `(E0.1)` Frame-wise object-centric temporal decoding:
+
 $$
 F_t = \mathrm{ImageEncoder}(I_t), \quad
 Q_t = \mathrm{TemporalAlign}(Q_t^{init}, M_{t-1}), \quad
@@ -71,6 +72,7 @@ H_t = \mathrm{Decoder}(Q_t, F_t, M_{t-1}), \quad
 $$
 
 `(E0.2)` Memory bank update:
+
 $$
 M_t = \mathrm{UpdateMemory}(M_{t-1}, \hat{Y}_t, H_t)
 $$
@@ -92,6 +94,7 @@ Map camera image flattening and feature restoration to tensor shapes.
 
 ### Explicit equations
 `(E1.1)` Camera-batch flattening:
+
 $$
 I_t \in \mathbb{R}^{B\times N_{cam}\times 3\times H\times W}
 \rightarrow
@@ -99,6 +102,7 @@ I'_t \in \mathbb{R}^{(B N_{cam})\times 3\times H\times W}
 $$
 
 `(E1.2)` Restore camera axis:
+
 $$
 F'_t \in \mathbb{R}^{(B N_{cam})\times C\times H_f\times W_f}
 \rightarrow
@@ -121,16 +125,19 @@ Connect depth lifting and camera projection inverse to implemented tensors.
 
 ### Explicit equations
 `(E2.1)` Depth-lifted homogeneous image point:
+
 $$
 \tilde{p}(u,v,d) = [u d, v d, d, 1]^T
 $$
 
 `(E2.2)` Camera-image inverse projection:
+
 $$
 p_{3d} = T^{-1}_{lidar2img}\,\tilde{p}
 $$
 
 `(E2.3)` Position-range normalization:
+
 $$
 \bar{p}_{3d} = \frac{p_{3d} - p_{min}}{p_{max} - p_{min}}
 $$
@@ -152,11 +159,13 @@ Map propagated queries and temporal memory keys to code tensors.
 
 ### Explicit equations
 `(E3.1)` Query augmentation with propagated memory:
+
 $$
 Q_t^{aug} = [Q_t^{init}; \tilde{Q}_{t-1}^{(1:K)}]
 $$
 
 `(E3.2)` Temporal positional modulation:
+
 $$
 P_t^{temp} = f_{q}(\mathrm{PE}_{3d}(R)) + f_{time}(\mathrm{PE}_{1d}(\tau))
 $$
@@ -182,16 +191,19 @@ Show how current frame memory and historical memory are jointly attended.
 
 ### Explicit equations
 `(E4.1)` Current image memory tokens:
+
 $$
 M_t^{img} \in \mathbb{R}^{(N_{cam}H_fW_f)\times B\times C}
 $$
 
 `(E4.2)` Cross-attention key composition:
+
 $$
 K_t = [M_t^{img}; M_{t-1}^{tail}]
 $$
 
 `(E4.3)` Decoder layer update:
+
 $$
 H_l^t = \mathrm{FFN}(\mathrm{CrossAttn}(\mathrm{SelfAttn}(H_{l-1}^t, Q_t^{aug}), K_t))
 $$
@@ -212,16 +224,19 @@ Map per-layer predictions and top-k memory writing behavior.
 
 ### Explicit equations
 `(E5.1)` Layer-wise head outputs:
+
 $$
 \hat{c}_l^t = f_{cls}(H_l^t), \quad \hat{b}_l^t = f_{reg}(H_l^t)
 $$
 
 `(E5.2)` Reference residual update for 3D center:
+
 $$
 \hat{r}_{xyz} = \sigma(\Delta_{xyz} + \sigma^{-1}(r_{xyz}))
 $$
 
 `(E5.3)` Top-k memory refresh from last layer:
+
 $$
 \mathcal{I}_k = \mathrm{TopK}(\max(\sigma(\hat{c}_L^t))), \quad
 M_t = [H_L^t[\mathcal{I}_k]; M_{t-1}]_{:L_{mem}}

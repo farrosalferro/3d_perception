@@ -64,6 +64,7 @@ MapTR maps multi-view images to vectorized map elements using a BEV-centered tra
 
 ### Explicit equations
 `(E0.1)` Feature extraction and structured decoding:
+
 $$
 F_t = \mathrm{ImageEncoder}(I_t),\quad
 B = \mathrm{BEVEncoder}(F_t),\quad
@@ -71,6 +72,7 @@ H = \mathrm{Decoder}(Q, B)
 $$
 
 `(E0.2)` Layer-wise predictions:
+
 $$
 \hat{Y} = \{(S_l, \hat{b}_l, P_l)\}_{l=1}^{L}
 $$
@@ -102,11 +104,13 @@ MapTR uses structured query embeddings to jointly model instance-level and point
 
 ### Explicit equations
 `(E1.1)` Query composition:
+
 $$
 Q_{i,j} = Q^{inst}_i + Q^{pts}_j
 $$
 
 `(E1.2)` Flatten query set:
+
 $$
 Q = \mathrm{reshape}(Q_{i,j}) \in \mathbb{R}^{(N_{vec}\cdot N_{pts})\times C}
 $$
@@ -140,11 +144,13 @@ MapTR builds BEV-centric memory by attending BEV queries to multi-view image fea
 
 ### Explicit equations
 `(E2.1)` Camera token memory:
+
 $$
 M = \mathrm{flatten}(F_t) \in \mathbb{R}^{(N_{cam}H_fW_f)\times B\times C}
 $$
 
 `(E2.2)` BEV update:
+
 $$
 B = \mathrm{FFN}(\mathrm{CrossAttn}(Q_{bev}, M))
 $$
@@ -178,16 +184,19 @@ All point queries are decoded in parallel; per-instance classes are predicted fr
 
 ### Explicit equations
 `(E3.1)` Decoder update:
+
 $$
 H_l = \mathrm{DecoderLayer}_l(H_{l-1}, B)
 $$
 
 `(E3.2)` Class logits from point-pooled vector embedding:
+
 $$
 S_l = f_{cls}\big(\mathrm{mean}_{pts}(H_l)\big)
 $$
 
 `(E3.3)` Point regression and box transform:
+
 $$
 P_l = \sigma(f_{reg}(H_l)),\quad
 \hat{b}_l = \mathrm{BoxFromPoints}(P_l)
@@ -225,11 +234,13 @@ MapTR decodes score-ranked vector predictions, then projects normalized geometry
 
 ### Explicit equations
 `(E4.1)` Top-k selection:
+
 $$
 \mathcal{K} = \mathrm{TopK}(\sigma(S_L))
 $$
 
 `(E4.2)` Metric-space projection:
+
 $$
 (x, y) = (x_{min}, y_{min}) + (x_n, y_n)\odot(x_{max}-x_{min}, y_{max}-y_{min})
 $$

@@ -61,6 +61,7 @@ FB-BEV combines forward projection, backward depth-aware refinement, and tempora
 
 ### Explicit equations
 `(E0.1)` Pipeline:
+
 $$
 F = \mathrm{ImageEncoder}(I),\;
 D = \mathrm{DepthNet}(F),\;
@@ -69,6 +70,7 @@ B' = \mathrm{BackwardProj}(B, F, D)
 $$
 
 `(E0.2)` Temporal fusion and detection:
+
 $$
 \tilde{B} = \mathrm{TemporalFuse}(B', M, t_f),\quad
 \hat{Y} = \mathrm{DetHead}(\mathrm{BEVEncoder}(\tilde{B}))
@@ -102,11 +104,13 @@ Use depth logits to weight per-camera context, then aggregate across cameras.
 
 ### Explicit equations
 `(E1.1)` Depth probabilities:
+
 $$
 D = \mathrm{softmax}(W_d * F)
 $$
 
 `(E1.2)` Lift and aggregate:
+
 $$
 B = \frac{1}{N_c}\sum_{i=1}^{N_c} \left(F_i \odot D_i\right)
 $$
@@ -139,11 +143,13 @@ Depth-aware attention reweights context-to-BEV aggregation using consistency ter
 
 ### Explicit equations
 `(E2.1)` Depth-consistency weight:
+
 $$
 w_c = \sigma\left(\langle q, k \rangle\right)\cdot d_{prior}
 $$
 
 `(E2.2)` Depth-aware update:
+
 $$
 B' = \mathrm{Conv}\left(q + w_c \cdot v\right)
 $$
@@ -176,11 +182,13 @@ Current BEV is fused with aligned history using relative ego-motion and temporal
 
 ### Explicit equations
 `(E3.1)` History alignment:
+
 $$
 M_t^{align} = \mathcal{W}(M_{t-1}, T_{t\rightarrow t-1})
 $$
 
 `(E3.2)` Time-aware fusion:
+
 $$
 \tilde{B}_t = \phi\left(\left[B_t,\; M_t^{align},\; t_f\right]\right)
 $$
@@ -212,17 +220,20 @@ A dense BEV head predicts class logits and box fields per cell; top-k cells beco
 
 ### Explicit equations
 `(E4.1)` Dense heads:
+
 $$
 H_{cls}, H_{reg} = f_{det}(\tilde{B})
 $$
 
 `(E4.2)` Metric conversion:
+
 $$
 x = \left(\sigma(\Delta x) + u\right)\cdot s_x + x_{min},\quad
 y = \left(\sigma(\Delta y) + v\right)\cdot s_y + y_{min}
 $$
 
 `(E4.3)` Top-k decode:
+
 $$
 \hat{Y} = \mathrm{TopK}\left(\sigma(H_{cls}), H_{reg}\right)
 $$
