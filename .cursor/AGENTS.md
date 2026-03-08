@@ -29,7 +29,7 @@ conda activate 3d_perception
 ## Canonical Per-Model Deliverables
 For model `<model>`:
 - `pytorch_implementation/<model>/`
-- `tests/<model>/test_intermediate_tensors.py`
+- `tests/<model>.py`
 - `study/<model>_paper_to_code.md`
 - `papers/<model>.pdf` (or documented external link if file is excluded)
 
@@ -44,7 +44,7 @@ A model is done only when all items pass:
 ## Recommended Run Commands
 ```bash
 conda activate 3d_perception
-pytest tests/<model> -q
+pytest tests/<model>.py -q
 ```
 
 ## Naming and Consistency

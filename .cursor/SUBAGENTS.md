@@ -21,7 +21,7 @@ conda activate 3d_perception
    - Implement forward path under `pytorch_implementation/<model>/`.
    - Output: runnable module(s) with explicit interfaces.
 4. Tester
-   - Add hook-based intermediate tensor tests under `tests/<model>/`.
+   - Add hook-based intermediate tensor tests in `tests/<model>.py`.
    - Output: shape assertions + finite-value assertions.
 5. Documentation Writer
    - Create/update `study/<model>_paper_to_code.md`.

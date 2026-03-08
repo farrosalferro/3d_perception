@@ -12,4 +12,4 @@ alwaysApply: false
 - Use compact debug configs so tests run quickly.
 - Include run guidance with:
   - `conda activate 3d_perception`
-  - `pytest tests/<model> -q`
+  - `pytest tests/<model>.py -q`

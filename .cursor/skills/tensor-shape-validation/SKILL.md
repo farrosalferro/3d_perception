@@ -19,7 +19,7 @@ conda activate 3d_perception
 3. Run one no-grad forward pass and collect captures.
 4. Assert shapes for critical intermediate tensors.
 5. Assert finite values on all captured tensors and outputs.
-6. Keep tests isolated per model in `tests/<model>/`.
+6. Keep tests isolated per model in `tests/<model>.py`.
 
 ## Template
 - Start from [hook_capture_template.py](hook_capture_template.py).

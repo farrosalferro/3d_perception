@@ -30,7 +30,7 @@ conda activate 3d_perception
    - compute merge base
    - run merge-tree style check to detect conflict markers
 5. Run relevant tests:
-   - if `pytorch_implementation/<model>/` changed, run `pytest tests/<model> -q`
+   - if `pytorch_implementation/<model>/` changed, run `pytest tests/<model>.py -q`
    - otherwise run the closest impacted test subset
 6. Produce a decision report:
    - `ready`, `ready-with-warnings`, or `blocked`

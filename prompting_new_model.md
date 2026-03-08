@@ -25,7 +25,7 @@ Context:
 
 Requirements:
 1) Implement pure PyTorch forward path in pytorch_implementation/<model_id>/ without MMDet3D/MMCV runtime dependency.
-2) Add intermediate tensor tests in tests/<model_id>/test_intermediate_tensors.py (shape checks + finite checks).
+2) Add intermediate tensor tests in tests/<model_id>.py (shape checks + finite checks).
 3) Add study document in study/<model_id>_paper_to_code.md mapping equations/symbols to code tensors.
 4) Update progress.md with date, model, status, branch, and deliverable paths.
 5) Use conda activate 3d_perception for run/test commands.
@@ -66,7 +66,7 @@ Before merging to main, run branch verification for this branch and return:
 
 ## Expected Deliverables Checklist
 - `pytorch_implementation/<model_id>/`
-- `tests/<model_id>/test_intermediate_tensors.py`
+- `tests/<model_id>.py`
 - `study/<model_id>_paper_to_code.md`
 - `progress.md` updated
 - branch verification report (before merge to `main`)

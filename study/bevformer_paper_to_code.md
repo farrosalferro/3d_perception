@@ -5,7 +5,7 @@ This note explains BEVFormer by binding paper concepts to your pure-PyTorch impl
 Primary references:
 - Paper: `BEVFormer.pdf`
 - Implementation: `pure_torch_bevformer/`
-- Shape verification: `tests/pure_torch_bevformer/test_intermediate_tensors.py`
+- Shape verification: `tests/bevformer.py`
 
 ## 1) Canonical study setup (fixed dummy run)
 
@@ -35,7 +35,7 @@ Expected outputs:
 - `all_bbox_preds`: `[num_dec, B, Q, 10] = [2, 1, 48, 10]`
 
 These shapes are validated in:
-- `tests/pure_torch_bevformer/test_intermediate_tensors.py`
+- `tests/bevformer.py`
 
 ## 2) Symbol dictionary (paper -> code tensors)
 
@@ -698,7 +698,7 @@ decoded = outputs["decoded"]
 BEVFormer is an information routing system: BEV grid queries route attention to relevant spatiotemporal evidence, then object queries read the BEV world model for detection.
 
 ### One sanity check
-All major intermediate hooks in `test_intermediate_tensors.py` should be present and finite.
+All major intermediate hooks in `tests/bevformer.py` should be present and finite.
 
 ---
 

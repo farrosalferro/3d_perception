@@ -12,7 +12,7 @@ description: Onboards an autonomous-driving perception model from reference repo
 3. Fill [template_model_contract.md](template_model_contract.md).
 4. Fill [template_test_matrix.md](template_test_matrix.md).
 5. Implement minimal forward path in `pytorch_implementation/<model>/`.
-6. Add intermediate tensor tests in `tests/<model>/`.
+6. Add intermediate tensor tests in `tests/<model>.py`.
 7. Author `study/<model>_paper_to_code.md`.
 8. Update `progress.md`.
 

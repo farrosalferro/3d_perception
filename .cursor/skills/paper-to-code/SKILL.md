@@ -19,7 +19,7 @@ Create a study note that links paper math to concrete tensors, modules, and test
 ## Required References
 - Paper source in `papers/`
 - Implementation in `pytorch_implementation/<model>/`
-- Tests in `tests/<model>/`
+- Tests in `tests/<model>.py`
 
 ## Style Rules
 - Keep terminology consistent from start to end.
