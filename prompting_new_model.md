@@ -25,10 +25,13 @@ Context:
 
 Requirements:
 1) Implement pure PyTorch forward path in pytorch_implementation/<model_id>/ without MMDet3D/MMCV runtime dependency.
-2) Add intermediate tensor tests in tests/<model_id>.py (shape checks + finite checks).
-3) Add study document in study/<model_id>_paper_to_code.md mapping equations/symbols to code tensors.
-4) Update progress.md with date, model, status, branch, and deliverable paths.
-5) Use conda activate 3d_perception for run/test commands.
+2) Add intermediate tensor tests in tests/<model_id>/test_intermediate_tensors.py (shape checks + finite checks).
+3) Add markdown study document in study/markdown/<model_id>_paper_to_code.md mapping equations/symbols to code tensors.
+4) Generate notebook in study/notebook/<model_id>_paper_to_code.ipynb from the markdown source using:
+   - conda activate 3d_perception
+   - python study/notebook/_generate_notebooks.py
+5) Update progress.md with date, model, status, branch, and deliverable paths (implementation/tests/markdown/notebook/paper).
+6) Use conda activate 3d_perception for run/test commands.
 
 Start with a short plan, then execute.
 ```
@@ -47,7 +50,7 @@ Please expand tests to cover encoder, decoder, and head intermediate tensor dime
 
 ### 3) Documentation Quality Pass
 ```text
-Please refine study/<model_id>_paper_to_code.md to ensure each section has: goal, equations, symbol table, code mapping, and one sanity check.
+Please refine study/markdown/<model_id>_paper_to_code.md to ensure each section has: goal, equations, symbol table, code mapping, and one sanity check, then regenerate study/notebook/<model_id>_paper_to_code.ipynb.
 ```
 
 ### 4) Progress Update Enforcement
@@ -66,7 +69,8 @@ Before merging to main, run branch verification for this branch and return:
 
 ## Expected Deliverables Checklist
 - `pytorch_implementation/<model_id>/`
-- `tests/<model_id>.py`
-- `study/<model_id>_paper_to_code.md`
+- `tests/<model_id>/test_intermediate_tensors.py`
+- `study/markdown/<model_id>_paper_to_code.md`
+- `study/notebook/<model_id>_paper_to_code.ipynb`
 - `progress.md` updated
 - branch verification report (before merge to `main`)

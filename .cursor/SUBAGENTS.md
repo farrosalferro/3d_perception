@@ -1,7 +1,7 @@
 # Subagent Workflow Guide
 
 ## Purpose
-Define a repeatable multi-role workflow for onboarding each model from `repos/` + `papers/` into pure PyTorch implementation, test coverage, and study documentation.
+Define a repeatable multi-role workflow for onboarding each model from `repos/` + `papers/` into pure PyTorch implementation, test coverage, markdown study documentation, and generated study notebooks.
 
 ## Runtime Convention
 Before any code execution:
@@ -24,8 +24,9 @@ conda activate 3d_perception
    - Add hook-based intermediate tensor tests in `tests/<model>.py`.
    - Output: shape assertions + finite-value assertions.
 5. Documentation Writer
-   - Create/update `study/<model>_paper_to_code.md`.
-   - Output: equation -> symbol -> code mapping narrative.
+   - Create/update `study/markdown/<model>_paper_to_code.md`.
+   - Generate `study/notebook/<model>_paper_to_code.ipynb` from markdown.
+   - Output: equation -> symbol -> code mapping narrative and synced notebook.
 6. Integrator
    - Verify definition-of-done checklist and update `progress.md`.
    - Output: milestone entry with status and artifact paths.
@@ -46,8 +47,14 @@ When a milestone completes, append/update `progress.md` with:
 - model
 - branch (or `N/A` if repository branch is unavailable)
 - status (`planned`, `in-progress`, `completed`, `blocked`)
-- deliverable paths (`pytorch_implementation`, `tests`, `study`, `papers`)
+- deliverable paths (`pytorch_implementation`, `tests`, `study/markdown`, `study/notebook`, `papers`)
 - notes on key decisions and blockers
+
+Notebook generation checkpoint for documentation milestones:
+```bash
+conda activate 3d_perception
+python study/notebook/_generate_notebooks.py
+```
 
 ## Pre-Merge Gate
 Before merging any model branch to `main`, run Branch Verifier:
