@@ -14,7 +14,7 @@ alwaysApply: false
   - tensor shape notes
   - one sanity check
 - Keep equation IDs stable and referenced consistently.
-- Use canonical model paths that match implementation and tests.
+- Use canonical task-model paths (`<task>/<model>`) that match implementation and tests.
 - Prefer concise technical explanations tied to concrete tensors.
-- Treat `study/markdown/<model>_paper_to_code.md` as the source of truth.
-- Ensure `study/notebook/<model>_paper_to_code.ipynb` is regenerated from markdown and committed in the same change.
+- Treat `study/markdown/<task>/<model>_paper_to_code.md` as the source of truth.
+- Ensure `study/notebook/<task>/<model>_paper_to_code.ipynb` is regenerated from markdown and committed in the same change.

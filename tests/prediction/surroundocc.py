@@ -1,0 +1,294 @@
+"""Intermediate tensor validation tests for prediction/surroundocc."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+torch = pytest.importorskip("torch")
+
+from pytorch_implementation.prediction.surroundocc.config import debug_forward_config
+from pytorch_implementation.prediction.surroundocc.model import SurroundOccPredictionLite
+from pytorch_implementation.prediction.surroundocc.postprocess import (
+    occupancy_iou,
+    trajectory_consistency_error,
+    trajectory_metrics,
+)
+
+
+def _first_tensor(value: Any) -> torch.Tensor | None:
+    if torch.is_tensor(value):
+        return value
+    if isinstance(value, (tuple, list)):
+        for item in value:
+            tensor = _first_tensor(item)
+            if tensor is not None:
+                return tensor
+    if isinstance(value, dict):
+        for item in value.values():
+            tensor = _first_tensor(item)
+            if tensor is not None:
+                return tensor
+    return None
+
+
+def _iter_tensors(value: Any):
+    if torch.is_tensor(value):
+        yield value
+    elif isinstance(value, (tuple, list)):
+        for item in value:
+            yield from _iter_tensors(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_tensors(item)
+
+
+def _register_hook(module, name: str, capture: dict[str, list[Any]], handles: list) -> None:
+    def _hook(_module, _inputs, output):
+        capture.setdefault(name, []).append(output)
+
+    handles.append(module.register_forward_hook(_hook))
+
+
+def _conv2d_out(size: int, kernel: int, stride: int, padding: int) -> int:
+    return ((size + 2 * padding - kernel) // stride) + 1
+
+
+@pytest.fixture()
+def instrumented_debug_forward():
+    cfg = debug_forward_config(
+        history_steps=4,
+        future_steps=5,
+        num_agents=6,
+        in_channels=16,
+        embed_dims=64,
+        bev_hw=(24, 24),
+        depth_bins=4,
+    )
+    model = SurroundOccPredictionLite(cfg).eval()
+
+    batch_size = 2
+    history_bev = torch.randn(
+        batch_size,
+        cfg.history_steps,
+        cfg.in_channels,
+        cfg.bev_hw[0],
+        cfg.bev_hw[1],
+    )
+    agent_states = torch.randn(batch_size, cfg.num_agents, 4)
+
+    capture: dict[str, list[Any]] = {}
+    handles = []
+    _register_hook(model.spatial_encoder.stem, "spatial.stem", capture, handles)
+    _register_hook(model.spatial_encoder.block1, "spatial.block1", capture, handles)
+    _register_hook(model.spatial_encoder.block2, "spatial.block2", capture, handles)
+    _register_hook(model.spatial_encoder.out_proj, "spatial.out_proj", capture, handles)
+    _register_hook(model.temporal_encoder.gru, "temporal.gru", capture, handles)
+    _register_hook(model.horizon_decoder.mlp, "horizon.mlp", capture, handles)
+    _register_hook(model.occupancy_head.refine, "occupancy.refine", capture, handles)
+    _register_hook(model.occupancy_head.classifier, "occupancy.classifier", capture, handles)
+    _register_hook(model.trajectory_head.agent_proj, "trajectory.agent_proj", capture, handles)
+    _register_hook(model.trajectory_head.delta_mlp, "trajectory.delta_mlp", capture, handles)
+
+    with torch.no_grad():
+        outputs = model(history_bev, agent_states, decode=False)
+        decoded_outputs = model(history_bev, agent_states, decode=True)
+
+    for handle in handles:
+        handle.remove()
+
+    decoded = decoded_outputs["decoded"]
+    pred_traj = outputs["trajectory"]
+    gt_traj = pred_traj + 0.05 * torch.randn_like(pred_traj)
+    metric_smoke = trajectory_metrics(pred_traj, gt_traj)
+    pred_occ = torch.stack([sample["occupancy"] for sample in decoded], dim=0)
+    gt_occ = pred_occ.clone()
+    gt_occ[..., 0, 0, 0] = True
+    occ_iou = occupancy_iou(pred_occ, gt_occ)
+
+    return {
+        "cfg": cfg,
+        "capture": capture,
+        "outputs": outputs,
+        "decoded": decoded,
+        "history_bev": history_bev,
+        "agent_states": agent_states,
+        "metric_smoke": metric_smoke,
+        "occ_iou": occ_iou,
+        "pred_occ": pred_occ,
+    }
+
+
+def test_intermediate_hooks_cover_major_prediction_blocks(instrumented_debug_forward):
+    capture = instrumented_debug_forward["capture"]
+    expected_names = {
+        "spatial.stem",
+        "spatial.block1",
+        "spatial.block2",
+        "spatial.out_proj",
+        "temporal.gru",
+        "horizon.mlp",
+        "occupancy.refine",
+        "occupancy.classifier",
+        "trajectory.agent_proj",
+        "trajectory.delta_mlp",
+    }
+    missing = sorted(expected_names - set(capture.keys()))
+    assert not missing, f"Missing intermediate captures: {missing}"
+    for name in expected_names:
+        assert capture[name], f"Hook for '{name}' captured no values."
+
+
+def test_shape_assertions_at_critical_boundaries(instrumented_debug_forward):
+    data = instrumented_debug_forward
+    cfg = data["cfg"]
+    capture = data["capture"]
+    outputs = data["outputs"]
+    decoded = data["decoded"]
+    history_bev = data["history_bev"]
+
+    batch_size = history_bev.shape[0]
+    history_steps = history_bev.shape[1]
+    bev_h, bev_w = cfg.bev_hw
+    mid_channels = max(cfg.embed_dims // 2, 16)
+    stage1_h = _conv2d_out(bev_h, kernel=3, stride=2, padding=1)
+    stage1_w = _conv2d_out(bev_w, kernel=3, stride=2, padding=1)
+    stage2_h = _conv2d_out(stage1_h, kernel=3, stride=2, padding=1)
+    stage2_w = _conv2d_out(stage1_w, kernel=3, stride=2, padding=1)
+
+    assert _first_tensor(capture["spatial.stem"][-1]).shape == (
+        batch_size * history_steps,
+        mid_channels,
+        bev_h,
+        bev_w,
+    )
+    assert _first_tensor(capture["spatial.block1"][-1]).shape == (
+        batch_size * history_steps,
+        mid_channels,
+        stage1_h,
+        stage1_w,
+    )
+    assert _first_tensor(capture["spatial.block2"][-1]).shape == (
+        batch_size * history_steps,
+        cfg.embed_dims,
+        stage2_h,
+        stage2_w,
+    )
+    assert _first_tensor(capture["spatial.out_proj"][-1]).shape == (
+        batch_size * history_steps,
+        cfg.embed_dims,
+        stage2_h,
+        stage2_w,
+    )
+    assert _first_tensor(capture["temporal.gru"][-1]).shape == (
+        batch_size,
+        cfg.history_steps,
+        cfg.embed_dims,
+    )
+    assert _first_tensor(capture["horizon.mlp"][-1]).shape == (
+        batch_size,
+        cfg.future_steps,
+        cfg.embed_dims,
+    )
+    assert _first_tensor(capture["occupancy.refine"][-1]).shape == (
+        batch_size * cfg.future_steps,
+        cfg.embed_dims,
+        stage2_h,
+        stage2_w,
+    )
+    assert _first_tensor(capture["occupancy.classifier"][-1]).shape == (
+        batch_size * cfg.future_steps,
+        cfg.occupancy_classes * cfg.depth_bins,
+        stage2_h,
+        stage2_w,
+    )
+    assert _first_tensor(capture["trajectory.agent_proj"][-1]).shape == (
+        batch_size,
+        cfg.num_agents,
+        cfg.embed_dims,
+    )
+    assert _first_tensor(capture["trajectory.delta_mlp"][-1]).shape == (
+        batch_size,
+        cfg.num_agents,
+        cfg.future_steps,
+        2,
+    )
+
+    assert outputs["occupancy_logits"].shape == (
+        batch_size,
+        cfg.future_steps,
+        cfg.occupancy_classes,
+        cfg.depth_bins,
+        stage2_h,
+        stage2_w,
+    )
+    assert outputs["trajectory"].shape == (batch_size, cfg.num_agents, cfg.future_steps, 2)
+    assert outputs["velocity"].shape == (batch_size, cfg.num_agents, cfg.future_steps, 2)
+    assert outputs["delta_velocity"].shape == (batch_size, cfg.num_agents, cfg.future_steps, 2)
+    assert outputs["horizon_tokens"].shape == (batch_size, cfg.future_steps, cfg.embed_dims)
+    assert outputs["temporal_sequence"].shape == (batch_size, cfg.history_steps, cfg.embed_dims)
+
+    assert len(decoded) == batch_size
+    for sample in decoded:
+        assert sample["occupancy"].shape == (cfg.future_steps, cfg.depth_bins, stage2_h, stage2_w)
+        assert sample["occupancy"].dtype == torch.bool
+        assert sample["trajectory"].shape == (cfg.num_agents, cfg.future_steps, 2)
+        assert sample["velocity"].shape == (cfg.num_agents, cfg.future_steps, 2)
+
+
+def test_intermediate_and_final_tensors_are_finite(instrumented_debug_forward):
+    data = instrumented_debug_forward
+    capture = data["capture"]
+    outputs = data["outputs"]
+    decoded = data["decoded"]
+
+    for name, values in capture.items():
+        assert values, f"No values captured for '{name}'."
+        for value in values:
+            tensors = list(_iter_tensors(value))
+            assert tensors, f"No tensor found in captured output for '{name}'."
+            for tensor in tensors:
+                assert torch.isfinite(tensor).all(), f"Non-finite values found in intermediate '{name}'."
+
+    for name, value in outputs.items():
+        tensors = list(_iter_tensors(value))
+        assert tensors, f"No tensor found in output '{name}'."
+        for tensor in tensors:
+            assert torch.isfinite(tensor).all(), f"Non-finite values found in final output '{name}'."
+
+    for sample in decoded:
+        for name, value in sample.items():
+            tensors = list(_iter_tensors(value))
+            assert tensors, f"No tensor found in decoded output '{name}'."
+            for tensor in tensors:
+                assert torch.isfinite(tensor).all(), f"Non-finite values found in decoded output '{name}'."
+
+
+def test_prediction_task_specific_integrity_checks(instrumented_debug_forward):
+    data = instrumented_debug_forward
+    cfg = data["cfg"]
+    outputs = data["outputs"]
+    metric_smoke = data["metric_smoke"]
+    occ_iou = data["occ_iou"]
+
+    # Horizon/time-axis integrity.
+    assert outputs["occupancy_logits"].shape[1] == cfg.future_steps
+    assert outputs["trajectory"].shape[2] == cfg.future_steps
+    horizon_deltas = outputs["horizon_tokens"][:, 1:] - outputs["horizon_tokens"][:, :-1]
+    assert horizon_deltas.abs().sum() > 0, "All horizon tokens are identical."
+
+    # Trajectory consistency with velocity integration.
+    consistency_error = trajectory_consistency_error(
+        outputs["trajectory"],
+        outputs["velocity"],
+        dt=cfg.dt,
+    )
+    assert consistency_error.item() < 1e-5, f"Trajectory consistency error too high: {consistency_error.item()}"
+
+    # Metric smoke checks.
+    assert metric_smoke["ade"] >= 0.0
+    assert metric_smoke["fde"] >= 0.0
+    assert torch.isfinite(torch.tensor(metric_smoke["ade"]))
+    assert torch.isfinite(torch.tensor(metric_smoke["fde"]))
+    assert 0.0 <= occ_iou <= 1.0

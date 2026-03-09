@@ -57,6 +57,7 @@ def _read_markdown(model_name: str) -> str:
 
 def _write_notebook(model_name: str, nb: nbf.NotebookNode) -> str:
     path = os.path.join(NB_DIR, f"{model_name}_paper_to_code.ipynb")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as fh:
         nbf.write(nb, fh)
     return path
@@ -1662,6 +1663,196 @@ STREAMPETR_CHUNKS = {
 
 
 # ---------------------------------------------------------------------------
+# prediction/surroundocc
+# ---------------------------------------------------------------------------
+
+def _make_prediction_surroundocc_notebook():
+    nb = _new_notebook()
+    md = _read_markdown("prediction/surroundocc")
+
+    nb.cells.append(code_cell("""\
+        import sys, os
+        sys.path.insert(0, os.path.abspath("../.."))
+
+        import torch
+        from pytorch_implementation.prediction.surroundocc.config import debug_forward_config
+        from pytorch_implementation.prediction.surroundocc.model import SurroundOccPredictionLite
+        from pytorch_implementation.prediction.surroundocc.postprocess import (
+            occupancy_iou,
+            trajectory_consistency_error,
+            trajectory_metrics,
+        )
+
+        cfg = debug_forward_config(
+            history_steps=4,
+            future_steps=5,
+            num_agents=6,
+            in_channels=16,
+            embed_dims=64,
+            bev_hw=(24, 24),
+            depth_bins=4,
+        )
+        model = SurroundOccPredictionLite(cfg).eval()
+
+        batch_size = 2
+        history_bev = torch.randn(
+            batch_size,
+            cfg.history_steps,
+            cfg.in_channels,
+            cfg.bev_hw[0],
+            cfg.bev_hw[1],
+        )
+        agent_states = torch.randn(batch_size, cfg.num_agents, 4)
+
+        print(f"Model: {type(model).__name__}")
+        print(f"Config: {cfg.name}")
+        print(f"history_bev: {tuple(history_bev.shape)}")
+        print(f"agent_states: {tuple(agent_states.shape)}")
+    """))
+    nb.cells.append(code_cell_raw(COMMON_HELPERS))
+
+    sections = _split_markdown_sections(md)
+    chunk_ids_seen = set()
+    i = 0
+    while i < len(sections):
+        heading, body = sections[i]
+        full_md = (heading + "\n" + body).strip() if heading else body.strip()
+        chunk_id = _chunk_id_from_heading(heading)
+
+        if heading.startswith("## "):
+            sub_parts = [full_md]
+            j = i + 1
+            while j < len(sections):
+                h2, b2 = sections[j]
+                if h2.startswith("## "):
+                    break
+                sub_parts.append((h2 + "\n" + b2).strip())
+                j += 1
+            nb.cells.append(md_cell("\n\n".join(sub_parts)))
+            i = j
+        else:
+            if full_md:
+                nb.cells.append(md_cell(full_md))
+            i += 1
+
+        if chunk_id is not None and chunk_id not in chunk_ids_seen:
+            chunk_ids_seen.add(chunk_id)
+            if chunk_id == 0:
+                nb.cells.append(code_cell("""\
+                    # Chunk 0: end-to-end prediction + decode
+                    with torch.no_grad():
+                        outputs = model(history_bev, agent_states, decode=False)
+                        decoded_outputs = model(history_bev, agent_states, decode=True)
+
+                    print("=== Output shapes ===")
+                    for key, val in outputs.items():
+                        if torch.is_tensor(val):
+                            print(f"  {key}: {tuple(val.shape)}")
+
+                    decoded = decoded_outputs["decoded"]
+                    print(f"\\nDecoded batch size: {len(decoded)}")
+                    print(f"Decoded sample occupancy: {tuple(decoded[0]['occupancy'].shape)}")
+                    print(f"Decoded sample trajectory: {tuple(decoded[0]['trajectory'].shape)}")
+                """))
+            elif chunk_id == 1:
+                nb.cells.append(code_cell("""\
+                    # Chunk 1: spatial + temporal encoding hooks
+                    capture, handles = {}, []
+                    _register_hook(model.spatial_encoder.stem, "spatial.stem", capture, handles)
+                    _register_hook(model.spatial_encoder.block1, "spatial.block1", capture, handles)
+                    _register_hook(model.spatial_encoder.block2, "spatial.block2", capture, handles)
+                    _register_hook(model.spatial_encoder.out_proj, "spatial.out_proj", capture, handles)
+                    _register_hook(model.temporal_encoder.gru, "temporal.gru", capture, handles)
+
+                    with torch.no_grad():
+                        outputs = model(history_bev, agent_states, decode=False)
+                    for h in handles:
+                        h.remove()
+
+                    print("=== Spatial/Temporal shapes ===")
+                    for key in sorted(capture.keys()):
+                        _print_shape(key, capture[key])
+                    _print_shape("temporal_sequence", outputs["temporal_sequence"])
+                """))
+            elif chunk_id == 2:
+                nb.cells.append(code_cell("""\
+                    # Chunk 2: horizon decoder + occupancy logits
+                    capture, handles = {}, []
+                    _register_hook(model.horizon_decoder.mlp, "horizon.mlp", capture, handles)
+                    _register_hook(model.occupancy_head.refine, "occupancy.refine", capture, handles)
+                    _register_hook(model.occupancy_head.classifier, "occupancy.classifier", capture, handles)
+
+                    with torch.no_grad():
+                        outputs = model(history_bev, agent_states, decode=False)
+                    for h in handles:
+                        h.remove()
+
+                    print("=== Horizon/Occupancy shapes ===")
+                    _print_shape("horizon.mlp", capture["horizon.mlp"])
+                    _print_shape("occupancy.refine", capture["occupancy.refine"])
+                    _print_shape("occupancy.classifier", capture["occupancy.classifier"])
+                    print(f"occupancy_logits: {tuple(outputs['occupancy_logits'].shape)}")
+                """))
+            elif chunk_id == 3:
+                nb.cells.append(code_cell("""\
+                    # Chunk 3: trajectory forecasting + consistency
+                    capture, handles = {}, []
+                    _register_hook(model.trajectory_head.agent_proj, "trajectory.agent_proj", capture, handles)
+                    _register_hook(model.trajectory_head.delta_mlp, "trajectory.delta_mlp", capture, handles)
+
+                    with torch.no_grad():
+                        outputs = model(history_bev, agent_states, decode=False)
+                    for h in handles:
+                        h.remove()
+
+                    print("=== Trajectory head shapes ===")
+                    _print_shape("trajectory.agent_proj", capture["trajectory.agent_proj"])
+                    _print_shape("trajectory.delta_mlp", capture["trajectory.delta_mlp"])
+                    print(f"trajectory: {tuple(outputs['trajectory'].shape)}")
+                    print(f"velocity: {tuple(outputs['velocity'].shape)}")
+
+                    consistency_error = trajectory_consistency_error(outputs["trajectory"], outputs["velocity"], dt=cfg.dt)
+                    print(f"consistency_error: {float(consistency_error):.6f}")
+                """))
+            elif chunk_id == 4:
+                nb.cells.append(code_cell("""\
+                    # Chunk 4: metric smoke checks
+                    with torch.no_grad():
+                        outputs = model(history_bev, agent_states, decode=False)
+                        decoded = model(history_bev, agent_states, decode=True)["decoded"]
+
+                    pred_traj = outputs["trajectory"]
+                    gt_traj = pred_traj + 0.05 * torch.randn_like(pred_traj)
+                    metrics = trajectory_metrics(pred_traj, gt_traj)
+                    print("trajectory metrics:", metrics)
+
+                    pred_occ = torch.stack([sample["occupancy"] for sample in decoded], dim=0)
+                    gt_occ = pred_occ.clone()
+                    gt_occ[..., 0, 0, 0] = True
+                    iou = occupancy_iou(pred_occ, gt_occ)
+                    print("occupancy IoU smoke:", iou)
+                """))
+
+    nb.cells.append(code_cell("""\
+        # Final finite check with major hooks
+        capture, handles = {}, []
+        _register_hook(model.spatial_encoder.stem, "spatial.stem", capture, handles)
+        _register_hook(model.temporal_encoder.gru, "temporal.gru", capture, handles)
+        _register_hook(model.horizon_decoder.mlp, "horizon.mlp", capture, handles)
+        _register_hook(model.occupancy_head.classifier, "occupancy.classifier", capture, handles)
+        _register_hook(model.trajectory_head.delta_mlp, "trajectory.delta_mlp", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(history_bev, agent_states, decode=False)
+        for h in handles:
+            h.remove()
+
+        _check_finite(capture, outputs)
+    """))
+    return nb
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1672,19 +1863,19 @@ def main() -> None:
     nb = _make_petr_notebook()
     path = _write_notebook("petr", nb)
     generated.append(path)
-    print(f"[1/7] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[1/8] Generated: {path}  ({len(nb.cells)} cells)")
 
     # BEVFormer
     nb = _make_bevformer_notebook()
     path = _write_notebook("bevformer", nb)
     generated.append(path)
-    print(f"[2/7] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[2/8] Generated: {path}  ({len(nb.cells)} cells)")
 
     # MapTR
     nb = _make_maptr_notebook()
     path = _write_notebook("maptr", nb)
     generated.append(path)
-    print(f"[3/7] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[3/8] Generated: {path}  ({len(nb.cells)} cells)")
 
     # FB-BEV
     nb = _make_simple_notebook(
@@ -1694,7 +1885,7 @@ def main() -> None:
     )
     path = _write_notebook("fbbev", nb)
     generated.append(path)
-    print(f"[4/7] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[4/8] Generated: {path}  ({len(nb.cells)} cells)")
 
     # PolarFormer
     nb = _make_simple_notebook(
@@ -1704,7 +1895,7 @@ def main() -> None:
     )
     path = _write_notebook("polarformer", nb)
     generated.append(path)
-    print(f"[5/7] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[5/8] Generated: {path}  ({len(nb.cells)} cells)")
 
     # Sparse4D
     nb = _make_simple_notebook(
@@ -1714,7 +1905,7 @@ def main() -> None:
     )
     path = _write_notebook("sparse4d", nb)
     generated.append(path)
-    print(f"[6/7] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[6/8] Generated: {path}  ({len(nb.cells)} cells)")
 
     # StreamPETR
     nb = _make_simple_notebook(
@@ -1724,7 +1915,13 @@ def main() -> None:
     )
     path = _write_notebook("streampetr", nb)
     generated.append(path)
-    print(f"[7/7] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[7/8] Generated: {path}  ({len(nb.cells)} cells)")
+
+    # prediction/surroundocc
+    nb = _make_prediction_surroundocc_notebook()
+    path = _write_notebook("prediction/surroundocc", nb)
+    generated.append(path)
+    print(f"[8/8] Generated: {path}  ({len(nb.cells)} cells)")
 
     print(f"\nAll {len(generated)} notebooks generated in {NB_DIR}")
 

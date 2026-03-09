@@ -1,7 +1,7 @@
 # Project Agents Guide
 
 ## Mission
-Build educational, pure-PyTorch reimplementations of autonomous-driving perception models so readers can understand math and mechanisms without MMDet3D/MMCV abstractions.
+Build educational, pure-PyTorch reimplementations of autonomous-driving models across perception, prediction, and planning so readers can understand math and mechanisms without MMDet3D/MMCV abstractions.
 
 ## Environment Setup
 Use this environment before running any Python code or tests:
@@ -19,6 +19,10 @@ conda activate 3d_perception
 - Generated study notebooks: `study/notebook/`
 - Project progress log: `progress.md`
 
+## Canonical Model Key
+- Use `<task>/<model>` for all artifacts.
+- Supported task namespaces: `perception`, `prediction`, `planning`.
+
 ## Non-Negotiables
 1. Reimplemented modules in `pytorch_implementation/` must run without MMDet3D/MMCV runtime dependencies.
 2. Every model must include intermediate tensor checks (not only final output checks).
@@ -29,12 +33,13 @@ conda activate 3d_perception
 7. Any development branch must pass branch verification against `main` before merge.
 
 ## Canonical Per-Model Deliverables
-For model `<model>`:
-- `pytorch_implementation/<model>/`
-- `tests/<model>/test_intermediate_tensors.py`
-- `study/markdown/<model>_paper_to_code.md`
-- `study/notebook/<model>_paper_to_code.ipynb`
-- `papers/<model>.pdf` (or documented external link if file is excluded)
+For model key `<task>/<model>`:
+- `repos/<task>/<model>/` (reference lineage)
+- `papers/<task>/<model>.pdf` (or documented external link if file is excluded)
+- `pytorch_implementation/<task>/<model>/`
+- `tests/<task>/<model>.py`
+- `study/markdown/<task>/<model>_paper_to_code.md`
+- `study/notebook/<task>/<model>_paper_to_code.ipynb`
 
 ## Definition of Done
 A model is done only when all items pass:
@@ -43,17 +48,21 @@ A model is done only when all items pass:
 - Intermediate and final tensors pass finite-value checks.
 - Paper equations/symbols are mapped to concrete code tensors in markdown.
 - Notebook is generated from the current markdown source in the same change.
+- Task-specific checks pass:
+  - Perception: decode/postprocess contract checks.
+  - Prediction: horizon/time-axis integrity and trajectory metric smoke checks.
+  - Planning: kinematic feasibility and collision/safety guard checks.
 - `progress.md` contains the latest status and deliverable links.
 
 ## Recommended Run Commands
 ```bash
 conda activate 3d_perception
-pytest tests/<model> -q
+pytest tests/<task>/<model>.py -q
 python study/notebook/_generate_notebooks.py
 ```
 
 ## Naming and Consistency
-- Keep model IDs lowercase with underscores (example: `bevformer`).
+- Keep task and model IDs lowercase with underscores (example: `perception/bevformer`).
 - Keep terminology consistent in docs (same symbol names and tensor names throughout).
-- Keep study artifacts synchronized as a pair: `study/markdown/<model>_paper_to_code.md` and `study/notebook/<model>_paper_to_code.ipynb`.
+- Keep study artifacts synchronized as a pair: `study/markdown/<task>/<model>_paper_to_code.md` and `study/notebook/<task>/<model>_paper_to_code.ipynb`.
 - If a path alias changes, update code/tests/study docs/notebooks in the same change.

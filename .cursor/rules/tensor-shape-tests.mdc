@@ -9,7 +9,11 @@ alwaysApply: false
 - Include intermediate tensor hooks for major backbone, encoder, decoder, and head blocks.
 - Assert expected tensor dimensions at critical boundaries.
 - Assert finite values for intermediate and final outputs.
+- Add task-specific checks in addition to shared shape/finite checks:
+  - perception: decode/postprocess contract checks
+  - prediction: horizon/time-axis integrity and trajectory metric smoke checks
+  - planning: kinematic feasibility and collision/safety checks
 - Use compact debug configs so tests run quickly.
 - Include run guidance with:
   - `conda activate 3d_perception`
-  - `pytest tests/<model>.py -q`
+  - `pytest tests/<task>/<model>.py -q`

@@ -1,6 +1,6 @@
 ---
 name: tensor-shape-validation
-description: Builds intermediate tensor validation tests with forward hooks, shape assertions, and finite checks for pure PyTorch model implementations. Use when adding or extending model tests.
+description: Builds intermediate tensor validation tests with forward hooks, shape assertions, and finite checks for pure PyTorch model implementations. Use when adding or extending task-model tests.
 ---
 
 # Tensor Shape Validation
@@ -19,7 +19,11 @@ conda activate 3d_perception
 3. Run one no-grad forward pass and collect captures.
 4. Assert shapes for critical intermediate tensors.
 5. Assert finite values on all captured tensors and outputs.
-6. Keep tests isolated per model in `tests/<model>.py`.
+6. Add task-specific assertions:
+   - perception: decode/postprocess contract checks
+   - prediction: horizon/time-axis integrity and trajectory metric smoke checks
+   - planning: kinematic feasibility and collision/safety checks
+7. Keep tests isolated per model in `tests/<task>/<model>.py`.
 
 ## Template
 - Start from [hook_capture_template.py](hook_capture_template.py).
@@ -28,3 +32,4 @@ conda activate 3d_perception
 - At least one assertion per major stage (backbone, encoder, decoder/head).
 - End-to-end output shape assertions.
 - Finite-value assertions.
+- Task-specific assertions appropriate to the task namespace (`perception`, `prediction`, or `planning`).

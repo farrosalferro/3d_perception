@@ -8,5 +8,6 @@ alwaysApply: true
 - Use `conda activate 3d_perception` before proposing run/test commands.
 - Keep educational implementations under `pytorch_implementation/`.
 - Treat `repos/` as reference lineage, not runtime dependency.
-- Require per-model deliverables: implementation, tests, markdown study doc, and generated notebook.
+- Use canonical model key `<task>/<model>` where task is one of `perception`, `prediction`, or `planning`.
+- Require per task-model deliverables: implementation, tests, markdown study doc, and generated notebook.
 - Update `progress.md` for every major milestone.

@@ -10,4 +10,4 @@ alwaysApply: false
 - Prefer explicit tensor shapes in docstrings or comments for non-trivial transforms.
 - Keep module boundaries close to paper blocks when feasible.
 - Favor readable math-faithful code over framework-specific abstractions.
-- Keep naming consistent with study docs and tests.
+- Keep naming consistent with study docs and tests, including task namespace (`<task>/<model>`).
