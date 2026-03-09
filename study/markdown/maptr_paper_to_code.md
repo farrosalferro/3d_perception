@@ -256,3 +256,84 @@ $$
 
 ### One sanity check
 Finite checks in the test file ensure decoded inputs (`all_cls_scores`, `all_bbox_preds`, `all_pts_preds`) are numerically stable.
+
+---
+
+## 3) Dataflow diagram
+
+```mermaid
+flowchart LR
+    imgInput["MultiCameraImage BxNcamx3xHxW"] --> backboneNeck[BackboneNeck]
+    backboneNeck --> mlvlFeats["mlvl_feats BxNcamxCxHfxWf"]
+    mlvlFeats --> bevEncoder["BEV Encoder cross-attn Q_bev to cam memory"]
+    bevQueries["Learnable BEV queries HWxC"] --> bevEncoder
+    bevPos["BEV positional encoding"] --> bevEncoder
+    bevEncoder --> bevEmbed["bev_embed BxHW_bevxC"]
+    bevEmbed --> decoder["TransformerDecoder L layers"]
+    hierQueries["Hierarchical queries Q_inst + Q_pts"] --> decoder
+    decoder --> outsDec["outs_dec LxQxBxC"]
+    outsDec --> clsBranch[cls_branches]
+    outsDec --> regBranch[reg_branches]
+    outsDec --> ptsBranch[pts_branches]
+    clsBranch --> clsScores["all_cls_scores LxBxVxCcls"]
+    regBranch --> bboxPreds["all_bbox_preds LxBxVx4"]
+    ptsBranch --> ptsPreds["all_pts_preds LxBxVxPx2"]
+    clsScores --> decode[MapTRNMSFreeCoderLite]
+    bboxPreds --> decode
+    ptsPreds --> decode
+```
+
+## 4) One end-to-end tensor trace
+
+1. Start with `img [1, 6, 3, 96, 160]`.
+2. Backbone+FPN returns one level `[1, 6, 128, 6, 10]`.
+3. Flatten camera features for BEV encoder:
+   - `feat_flatten [6, 60, 1, 128]`, `spatial_shapes [[6, 10]]`.
+4. Initialize BEV queries: `bev_queries [900, 1, 128]`, `bev_pos [900, 1, 128]`.
+5. BEV encoder (cross-attention from BEV queries to camera memory):
+   - output `bev_embed [1, 900, 128]`.
+6. Build hierarchical queries:
+   - `instance_embedding [10, 128]` + `pts_embedding [4, 128]` -> flattened `query [40, 128]`.
+   - expanded to `[40, 1, 128]`.
+7. Run 2 decoder layers (self-attn -> cross-attn to BEV -> FFN):
+   - each layer output `[40, 1, 128]`.
+8. Stacked intermediate: `outs_dec [2, 40, 1, 128]`.
+9. Reshape to vector-level: `[2, 1, 10, 4, 128]`.
+10. Per-layer head branches with reference-point refinement:
+    - `all_cls_scores [2, 1, 10, 3]`
+    - `all_bbox_preds [2, 1, 10, 4]` (normalized cx, cy, w, h)
+    - `all_pts_preds [2, 1, 10, 4, 2]` (normalized point coordinates).
+11. NMS-free decode selects top-k vectors and outputs map elements.
+
+## 5) Study drills (self-check questions)
+
+1. Why does MapTR use two-level (instance + point) queries instead of a flat query set?
+2. What tensors correspond to paper symbols `Q_inst`, `Q_pts`, and `B`?
+3. How is `all_bbox_preds` derived from `all_pts_preds` — what geometric operation converts points to a bounding box?
+4. Why does the BEV encoder use cross-attention from BEV queries to camera features instead of projecting features directly?
+5. What changes in decoder attention patterns if you double `num_pts_per_vec`?
+6. How are point coordinates normalized, and to what range?
+7. Where does the instance-level embedding interact with the point-level embedding?
+8. Why does the model predict both bounding boxes and point sets rather than just one?
+9. How does `MapTRNMSFreeCoderLite` handle the per-vector vs. per-point split?
+10. What would happen if you removed the BEV encoder and directly used camera features as decoder memory?
+
+## 6) Practical reading order for this note
+
+1. Read Sections 1 and 2 once.
+2. Walk through Chunk 1 (backbone and BEV encoding) to understand the BEV representation.
+3. Study Chunk 2 (hierarchical query construction).
+4. Study Chunk 3 (decoder with reference-point refinement).
+5. Study Chunk 4 (detection heads and point prediction).
+6. Re-read Chunk 0 (end-to-end) to tie the full pipeline together.
+7. Re-run the end-to-end trace in Section 4 while stepping through code.
+8. Answer study drills without looking at code, then verify.
+
+## 7) Known implementation simplifications in this repo
+
+- Single FPN level only (no multi-scale BEV encoder).
+- Uses simplified deformable attention with `grid_sample` instead of custom CUDA ops.
+- No point-to-point permutation-equivalent matching loss — focuses on forward-path mechanics.
+- Map class count is reduced to 3 in the debug config for quick iteration.
+
+These simplifications keep the MapTR concept flow explicit for study.

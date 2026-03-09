@@ -208,3 +208,83 @@ $$
 ### One sanity check
 Tests assert finite values for all hooked intermediates and all final outputs.
 
+---
+
+## 3) Dataflow diagram
+
+```mermaid
+flowchart LR
+    imgInput["MultiCameraImage BxNcamx3xHxW"] --> backboneNeck[BackboneNeck]
+    backboneNeck --> mlvlFeats["mlvl_feats per-level BxNcamxCxHlxWl"]
+    mlvlFeats --> polarProj["PolarCrossAttention per-cam per-level"]
+    imgMetas["img_metas lidar2img cam2lidar"] --> polarProj
+    polarPos["polar_pos + image_pos"] --> polarProj
+    polarProj --> polarMemory["Multi-scale polar memory"]
+    polarMemory --> flatten["Flatten + concat levels"]
+    flatten --> decoder["TransformerDecoder L layers"]
+    queryEmbeds["Object queries Q x 2C"] --> decoder
+    decoder --> outsDec["outs_dec L x Q x B x C"]
+    outsDec --> clsBranch["cls_branches"]
+    outsDec --> regBranch["reg_branches"]
+    clsBranch --> clsScores["all_cls_scores LxBxQxCcls"]
+    regBranch --> bboxPreds["all_bbox_preds LxBxQxCbox"]
+    clsScores --> decode[NMSFreeCoderLite]
+    bboxPreds --> decode
+```
+
+## 4) One end-to-end tensor trace
+
+1. Start with `img [1, 6, 3, 96, 160]`.
+2. Backbone+FPN returns multi-level features:
+   - Level 0: `[1, 6, 256, 6, 10]`
+   - Level 1: `[1, 6, 256, 3, 5]`
+   - Level 2: `[1, 6, 256, 2, 3]` (approximate, depends on backbone strides).
+3. Per-camera per-level polar cross-attention:
+   - For each camera, project image columns into polar rays.
+   - Polar output level 0: `[R, A] = [48, 96]` -> `[4608, 256]` tokens.
+   - Level 1: `[24, 48]` -> `[1152, 256]`.
+   - Level 2: `[12, 24]` -> `[288, 256]`.
+4. Flatten and concatenate all levels into memory:
+   - `memory [6048, 1, 256]` (4608 + 1152 + 288).
+   - `spatial_shapes [[48, 96], [24, 48], [12, 24]]`.
+5. Object queries: `query_embeds [48, 512]` split into `query_pos [48, 256]` and `query [48, 256]`.
+6. Initial reference points from linear + sigmoid: `init_reference [1, 48, 3]`.
+7. Run 2 decoder layers (self-attn -> cross-attn to polar memory -> FFN):
+   - each layer output `[48, 1, 256]`.
+8. Per-layer cls/reg branches with iterative reference refinement:
+   - `all_cls_scores [2, 1, 48, 10]`
+   - `all_bbox_preds [2, 1, 48, 10]`.
+9. NMS-free decode selects top-k candidates and outputs final 3D boxes.
+
+## 5) Study drills (self-check questions)
+
+1. Why does PolarFormer use a polar coordinate system for BEV encoding instead of Cartesian?
+2. What concrete tensors correspond to paper symbols `R_i`, `P_polar`, and `M`?
+3. How does `_project_single_camera` map image columns to polar rays?
+4. Why does the model process each camera independently in the polar cross-attention rather than jointly?
+5. What happens to polar memory resolution at different FPN levels?
+6. How are `polar_pos` and `image_pos` used to inject geometric awareness into cross-attention?
+7. Why does the decoder use iterative reference-point refinement rather than direct regression?
+8. How does `inverse_sigmoid` participate in the reference-point update?
+9. What would happen if all cameras had the same `cam2lidar` — how would polar projections differ?
+10. Why is multi-scale polar memory important — could you use a single scale?
+
+## 6) Practical reading order for this note
+
+1. Read Sections 1 and 2 once.
+2. Walk through Chunk 1 (backbone and polar cross-attention) — understand the polar representation.
+3. Study Chunk 2 (multi-scale polar memory and decoder structure).
+4. Study Chunk 3 (detection heads and reference refinement).
+5. Re-read Chunk 0 (end-to-end) to tie the full pipeline together.
+6. Re-run the tensor trace in Section 4 while stepping through code.
+7. Answer study drills without looking at code, then verify.
+
+## 7) Known implementation simplifications in this repo
+
+- Polar cross-attention uses `grid_sample` rather than custom polar CUDA kernels.
+- Azimuth and radius bin counts are configurable but kept small in the debug config.
+- No multi-frame temporal fusion — each frame is processed independently.
+- Uses standard `nn.MultiheadAttention` in the decoder instead of deformable attention.
+
+These simplifications keep the PolarFormer concept flow explicit for study.
+

@@ -201,3 +201,81 @@ $$
 
 ### One sanity check
 Tests assert head branch output shapes and finite values for all captured intermediates/final tensors.
+
+---
+
+## 3) Dataflow diagram
+
+```mermaid
+flowchart LR
+    imgInput["MultiCameraImage BxNcamx3xHxW"] --> backboneNeck[BackboneNeck]
+    backboneNeck --> mlvlFeats["mlvl_feats multi-level features"]
+    mlvlFeats --> featProj["Feature projection per level"]
+    featProj --> projFeats["projected features for sampling"]
+    instanceBank["InstanceBank anchors + features"] --> anchorEnc[AnchorEncoder]
+    anchorEnc --> anchorEmbed["anchor_embed BxQxC"]
+    instanceBank --> queryInit["instance_feature BxQxC"]
+    queryInit --> decoder["Sparse4DDecoder L layers"]
+    anchorEmbed --> decoder
+    projFeats --> decoder
+    imgMetas["projection_mat image_wh"] --> decoder
+    decoder --> refinedQuery["refined query + anchors"]
+    refinedQuery --> clsBranch[cls_branches]
+    refinedQuery --> regBranch[reg_branches]
+    clsBranch --> clsScores["all_cls_scores LxBxQxCcls"]
+    regBranch --> bboxPreds["all_bbox_preds LxBxQx11"]
+    clsScores --> decode[SparseBox3DDecoderLite]
+    bboxPreds --> decode
+```
+
+## 4) One end-to-end tensor trace
+
+1. Start with `img [1, 6, 3, 96, 160]`.
+2. Backbone+FPN returns multi-level features (e.g., 4 levels with varying spatial sizes).
+3. Feature projection aligns channel dims: each level `[1, 6, 256, Hl, Wl]`.
+4. Instance bank provides:
+   - `anchors [1, 48, 11]` (3D anchor parameters: center, size, rotation, velocity)
+   - `instance_feature [1, 48, 256]` (query features).
+5. Anchor encoder embeds anchors: `anchor_embed [1, 48, 256]`.
+6. Run 2 decoder layers, each consisting of:
+   - Self-attention among queries: `[1, 48, 256]`.
+   - Deformable feature aggregation (sample from multi-view multi-level features).
+   - FFN refinement.
+   - Anchor refinement: update `anchors [1, 48, 11]`.
+7. Per-layer head branches:
+   - `all_cls_scores [2, 1, 48, 10]`
+   - `all_bbox_preds [2, 1, 48, 11]`.
+8. Box decoder converts anchor codes to metric 3D boxes, top-k selection.
+
+## 5) Study drills (self-check questions)
+
+1. Why does Sparse4D use explicit 3D anchors rather than learned reference points like DETR?
+2. What concrete tensors correspond to paper symbols `Q_t`, `A_t`, and `E(A_t)`?
+3. How does `AnchorEncoder` convert an 11-D anchor to an embedding — what is the architecture?
+4. What is "deformable feature aggregation" and how does it differ from standard cross-attention?
+5. Why does anchor refinement happen at every decoder layer rather than only at the end?
+6. How does `projection_mat` connect 3D anchor locations to 2D image sampling points?
+7. What is the role of `image_wh` in the sampling process?
+8. Why is `box_code_size = 11` — what are the 11 components?
+9. How does the instance bank persist across frames in the temporal variant?
+10. What would happen if you removed anchor refinement and kept anchors fixed?
+
+## 6) Practical reading order for this note
+
+1. Read Sections 1 and 2 once.
+2. Walk through Chunk 1 (backbone and anchor encoding) — understand inputs.
+3. Study Chunk 2 (decoder with self-attention and deformable aggregation).
+4. Study Chunk 3 (anchor refinement per layer).
+5. Study Chunk 4 (detection heads and box decode).
+6. Re-read Chunk 0 (end-to-end) to tie the full pipeline together.
+7. Re-run the tensor trace in Section 4 while stepping through code.
+8. Answer study drills without looking at code, then verify.
+
+## 7) Known implementation simplifications in this repo
+
+- Deformable feature aggregation uses pure PyTorch `grid_sample` instead of custom CUDA operators.
+- No temporal recurrence in the instance bank for the debug config (single-frame mode).
+- Anchor initialization is from learned embeddings rather than data-driven proposals.
+- Multi-level feature projection uses simple linear layers.
+
+These simplifications keep the Sparse4D concept flow explicit for study.

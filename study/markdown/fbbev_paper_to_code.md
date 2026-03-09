@@ -253,3 +253,86 @@ $$
 
 ### One sanity check
 Tests assert class/box output dimensions and finite values for all captures and outputs.
+
+---
+
+## 3) Dataflow diagram
+
+```mermaid
+flowchart LR
+    imgInput["MultiCameraImage BxNcamx3xHxW"] --> backboneNeck[BackboneNeck]
+    backboneNeck --> cameraFeat["camera_feat BxNcamxCxHfxWf"]
+    cameraFeat --> depthNet[FBBEVDepthNetLite]
+    depthNet --> context["context BxNcamxCxHfxWf"]
+    depthNet --> depth["depth BxNcamxDxHfxWf"]
+    context --> fwdProj[ForwardProjectionLite]
+    depth --> fwdProj
+    fwdProj --> bevVolume["bev_volume BxCxHbevxWbevxZbev"]
+    bevVolume --> bwdProj[BackwardProjectionLite]
+    cameraFeat --> bwdProj
+    depth --> bwdProj
+    bwdProj --> bevRefined["bev_refined BxCxHbevxWbev"]
+    bevRefined --> temporal[TemporalFusionLite]
+    imgMetas["img_metas ego_rt"] --> temporal
+    temporal --> bevFused["bev_fused BxCxHbevxWbev"]
+    bevFused --> bevEncoder[BEV Encoder convs]
+    bevEncoder --> detHead[FBBEVDetectionHeadLite]
+    detHead --> clsScores["all_cls_scores 1xBxQxCcls"]
+    detHead --> bboxPreds["all_bbox_preds 1xBxQx9"]
+    clsScores --> decode[FBBEVBoxCoderLite]
+    bboxPreds --> decode
+```
+
+## 4) One end-to-end tensor trace
+
+1. Start with `img [2, 6, 3, 96, 160]`.
+2. Backbone+FPN returns camera features `[2, 6, 128, 6, 10]`.
+3. DepthNet produces:
+   - `context [2, 6, 128, 6, 10]` (projected camera features)
+   - `depth [2, 6, 6, 6, 10]` (softmax depth distribution, 6 bins).
+4. Forward projection lifts and aggregates:
+   - `bev_volume [2, 128, 20, 20, 3]`.
+5. Collapse Z dimension: `bev_2d [2, 128, 20, 20]`.
+6. Backward projection refines with depth-aware attention:
+   - `depth_weight [2, 1, 20, 20]`
+   - `bev_refined [2, 128, 20, 20]`.
+7. Temporal fusion aligns history with ego-motion and fuses:
+   - `bev_fused [2, 128, 20, 20]`.
+8. BEV encoder conv layers refine: `[2, 128, 20, 20]`.
+9. Detection head produces dense cls/reg maps, then selects top-k queries:
+   - `all_cls_scores [1, 2, 48, 10]`
+   - `all_bbox_preds [1, 2, 48, 9]`.
+10. Box coder decodes metric boxes/scores/labels.
+
+## 5) Study drills (self-check questions)
+
+1. Why does FB-BEV combine forward and backward projection instead of using only one?
+2. What concrete tensors correspond to paper symbols `F`, `D`, `B`, and `B'`?
+3. How does `ForwardProjectionLite` aggregate across cameras — averaging or concatenation?
+4. What is the role of `depth_weight` in backward projection, and how is it computed?
+5. Why does temporal fusion need `curr_to_prev_ego_rt` — what would happen without ego-motion alignment?
+6. How does the detection head go from a dense BEV map to a query-style `[B, Q, ...]` output?
+7. What is the purpose of `_meshgrid` in the detection head?
+8. Why does the model use a Z dimension (`Zbev=3`) in the BEV volume that is later collapsed?
+9. How does `start_of_sequence` affect temporal fusion behavior?
+10. What would change if you doubled `depth_bins` — which tensors grow and which stay the same?
+
+## 6) Practical reading order for this note
+
+1. Read Sections 1 and 2 once.
+2. Walk through Chunk 1 (depth net and forward projection) — understand the lift-splat path.
+3. Study Chunk 2 (backward projection with depth-aware attention).
+4. Study Chunk 3 (temporal fusion and ego-alignment).
+5. Study Chunk 4 (detection head and top-k decode).
+6. Re-read Chunk 0 (end-to-end) to tie the pipeline together.
+7. Re-run the tensor trace in Section 4 while stepping through code.
+8. Answer study drills without looking at code, then verify.
+
+## 7) Known implementation simplifications in this repo
+
+- Forward projection uses simple bilinear interpolation to scatter into BEV volume instead of pillar-based scatter.
+- Temporal fusion queue depth is limited (typically 1 history frame) in the debug config.
+- Backward projection uses a lightweight attention mechanism instead of full transformer cross-attention.
+- Detection head uses dense conv prediction + top-k rather than learned query attention.
+
+These simplifications keep the FB-BEV concept flow explicit for study.

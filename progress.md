@@ -21,6 +21,15 @@ conda activate 3d_perception
 | 2026-03-08 | FBBEV | create-fbbef-model | completed (forward + intermediate tensor checks) | `pytorch_implementation/fbbev/` | `tests/fbbev/test_intermediate_tensors.py` | `study/fbbev_paper_to_code.md` | `/media/farrosalferro/College/study/3d_perception/papers/FB-BEV.pdf` | Pure-PyTorch FB-BEV 3D detection forward path onboarded with temporal fusion, depth-aware refinement, and validated intermediate tensor contracts. |
 | 2026-03-08 | StreamPETR | create-streampetr-model | completed (forward + temporal memory + intermediate tensor checks) | `pytorch_implementation/streampetr/` | `tests/streampetr/test_intermediate_tensors.py` | `study/streampetr_paper_to_code.md` | `papers/StreamPETR.pdf` (remote source used) | Pure-PyTorch StreamPETR-style temporal query propagation implemented from public references: https://arxiv.org/abs/2303.11926 and https://github.com/exiawsh/StreamPETR. |
 
+## Study Materials Update
+
+| Date | Change | Details |
+|---|---|---|
+| 2026-03-08 | Markdown study docs created | All 7 models: `study/markdown/<model>_paper_to_code.md` with chunks 0-N, sections 1-2 |
+| 2026-03-08 | Jupyter notebooks generated | All 7 models: `study/notebook/<model>_paper_to_code.ipynb` with executable code cells |
+| 2026-03-09 | Sections 3-7 added to all models | Dataflow diagram, tensor trace, study drills, reading order, simplifications — for PETR, MapTR, FB-BEV, PolarFormer, Sparse4D, StreamPETR (BEVFormer already had them) |
+| 2026-03-09 | Notebooks regenerated | All 7 notebooks updated with new sections 3-7 |
+
 ## Entry Template
 
 Use this template for new rows:

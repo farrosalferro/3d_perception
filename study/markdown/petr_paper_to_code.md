@@ -308,3 +308,83 @@ and similarly for `y, z`.
 ### One sanity check
 Tests assert class/box branch output dimensions for every decoder layer and finite values for all captured outputs.
 
+---
+
+## 3) Dataflow diagram
+
+```mermaid
+flowchart LR
+    imgInput["MultiCameraImage BxNcamx3xHxW"] --> backboneNeck[BackboneNeck]
+    backboneNeck --> mlvlFeats["mlvl_feats BxNcamxCxHfxWf"]
+    mlvlFeats --> inputProj[input_proj]
+    inputProj --> posEmbed["position_embeding + adapt_pos3d"]
+    imgMetas["img_metas lidar2img"] --> posEmbed
+    posEmbed --> keyPos["pos_embed = P_3d + P_img"]
+    inputProj --> flattenMemory["Flatten to NcamHfWf x B x C"]
+    keyPos --> decoder[TransformerDecoder]
+    flattenMemory --> decoder
+    refPoints["reference_points Q x 3"] --> queryEmbed["pos2posemb3d + query_embedding"]
+    queryEmbed --> decoder
+    decoder --> outsDec["outs_dec L x Q x B x C"]
+    outsDec --> clsBranches[cls_branches]
+    outsDec --> regBranches[reg_branches]
+    clsBranches --> clsScores["all_cls_scores L x B x Q x Ccls"]
+    regBranches --> bboxPreds["all_bbox_preds L x B x Q x Cbox"]
+    clsScores --> decode[NMSFreeCoderLite]
+    bboxPreds --> decode
+```
+
+## 4) One end-to-end tensor trace
+
+1. Start with `img [1, 6, 3, 96, 160]`.
+2. Backbone+FPN returns one level `[1, 6, 256, 6, 10]`.
+3. `input_proj` projects to `[6, 256, 6, 10]`.
+4. `position_embeding` lifts pixel-depth points to 3D and encodes: `coords_position_embedding [1, 6, 256, 6, 10]`.
+5. Sine 2D positional encoding + `adapt_pos3d`: `sin_embed [1, 6, 256, 6, 10]`.
+6. `pos_embed = coords_position_embedding + sin_embed`: `[1, 6, 256, 6, 10]`.
+7. Flatten camera memory: `memory [360, 1, 256]` (6 cams * 6 * 10 = 360 tokens).
+8. `key_pos` flattened similarly: `[360, 1, 256]`.
+9. `key_padding_mask`: `[1, 360]`.
+10. Reference points: `[48, 3]` -> `pos2posemb3d` -> `query_embeds [48, 256]`.
+11. Query initialization: `target = zeros [48, 1, 256]`, `query_pos [48, 1, 256]`.
+12. Run 2 decoder layers (self-attn -> cross-attn -> FFN):
+    - each layer output `[48, 1, 256]`.
+13. Stacked intermediate: `outs_dec [2, 48, 1, 256]` -> permuted to `[2, 1, 48, 256]`.
+14. Per-layer cls/reg branches with reference-aware updates:
+    - `all_cls_scores [2, 1, 48, 10]`
+    - `all_bbox_preds [2, 1, 48, 10]`.
+15. NMS-free decode selects top-k candidates and outputs final boxes/scores/labels.
+
+## 5) Study drills (self-check questions)
+
+1. Why does PETR use depth bins to lift 2D image points to 3D instead of estimating explicit depth?
+2. What concrete tensors correspond to paper symbols `F_t`, `P_3d`, and `r_q`?
+3. How does `position_embeding` decide which 3D points are out of range, and what mask does it produce?
+4. Why are query embeddings derived from 3D reference points via sinusoidal encoding rather than being fully learned?
+5. What changes in the `coords_position_embedding` tensor if you double `depth_num`?
+6. Where exactly does `pos_embed = P_3d + P_img` happen in the code?
+7. Why does the decoder use `key_padding_mask` based on image/pad shapes?
+8. Which box coordinates use the reference-aware sigmoid residual update (`inverse_sigmoid`) vs. direct regression?
+9. What is the role of `adapt_pos3d` — why not use `sin_embed` directly?
+10. If all cameras had identical `lidar2img` matrices, what symmetry would you see in the 3D position embeddings?
+
+## 6) Practical reading order for this note
+
+1. Read Sections 1 and 2 once.
+2. Walk through Chunk 1 (backbone) then Chunk 2 (3D position embedding) to understand inputs.
+3. Study Chunk 3 (query construction from reference points).
+4. Study Chunk 4 (decoder layers).
+5. Study Chunk 5 (heads and decode).
+6. Re-read Chunk 0 (end-to-end) to tie the full pipeline together.
+7. Re-run the end-to-end trace in Section 4 while stepping through code.
+8. Answer study drills without looking at code, then verify.
+
+## 7) Known implementation simplifications in this repo
+
+- Uses standard `nn.MultiheadAttention` instead of deformable attention.
+- Single FPN level only (no multi-scale features).
+- No data augmentation transforms in the geometry pipeline.
+- `lidar_discretization` depth binning is configurable but defaults to uniform spacing.
+
+These simplifications keep the PETR concept flow explicit for study.
+
