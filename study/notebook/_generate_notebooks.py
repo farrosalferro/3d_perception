@@ -8,6 +8,11 @@ import textwrap
 
 import nbformat as nbf
 
+try:
+    from ._builder_primitives import new_notebook as _shared_new_notebook
+except ImportError:  # pragma: no cover - script execution fallback
+    from _builder_primitives import new_notebook as _shared_new_notebook
+
 WORKSPACE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MD_DIR = os.path.join(WORKSPACE, "study", "markdown")
 NB_DIR = os.path.join(WORKSPACE, "study", "notebook")
@@ -69,14 +74,7 @@ def _chunk_id_from_heading(heading: str):
 
 
 def _new_notebook() -> nbf.NotebookNode:
-    nb = nbf.v4.new_notebook()
-    nb.metadata["kernelspec"] = {
-        "display_name": "Python 3 (3d_perception)",
-        "language": "python",
-        "name": "python3",
-    }
-    nb.metadata["language_info"] = {"name": "python", "version": "3.10.0"}
-    return nb
+    return _shared_new_notebook()
 
 
 COMMON_HELPERS = '''\
@@ -1141,6 +1139,30 @@ def _append_markdown_sections_with_chunks(
                 nb.cells.append(code_cell(chunk_code[chunk_id]))
 
 
+def _build_final_finite_check_cell(
+    *,
+    hook_lines: list[str],
+    forward_lines: list[str],
+    title: str = "Final finite check with major hooks",
+) -> str:
+    hook_block = "\n".join(f"        {line}" for line in hook_lines)
+    forward_block = "\n".join(f"            {line}" for line in forward_lines)
+    return textwrap.dedent(
+        f"""\
+        # {title}
+        capture, handles = {{}}, []
+{hook_block}
+
+        with torch.no_grad():
+{forward_block}
+        for h in handles:
+            h.remove()
+
+        _check_finite(capture, outputs)
+    """
+    ).strip()
+
+
 # ---------------------------------------------------------------------------
 # FB-BEV
 # ---------------------------------------------------------------------------
@@ -1869,58 +1891,21 @@ def _make_prediction_surroundocc_notebook():
                     print("occupancy IoU smoke:", iou)
                 """))
 
-    nb.cells.append(code_cell("""\
-        # Final finite check with major hooks
-        capture, handles = {}, []
-        _register_hook(model.spatial_encoder.stem, "spatial.stem", capture, handles)
-        _register_hook(model.temporal_encoder.gru, "temporal.gru", capture, handles)
-        _register_hook(model.horizon_decoder.mlp, "horizon.mlp", capture, handles)
-        _register_hook(model.occupancy_head.classifier, "occupancy.classifier", capture, handles)
-        _register_hook(model.trajectory_head.delta_mlp, "trajectory.delta_mlp", capture, handles)
-
-        with torch.no_grad():
-            outputs = model(history_bev, agent_states, decode=False)
-        for h in handles:
-            h.remove()
-
-        _check_finite(capture, outputs)
-    """))
+    nb.cells.append(
+        code_cell(
+            _build_final_finite_check_cell(
+                hook_lines=[
+                    '_register_hook(model.spatial_encoder.stem, "spatial.stem", capture, handles)',
+                    '_register_hook(model.temporal_encoder.gru, "temporal.gru", capture, handles)',
+                    '_register_hook(model.horizon_decoder.mlp, "horizon.mlp", capture, handles)',
+                    '_register_hook(model.occupancy_head.classifier, "occupancy.classifier", capture, handles)',
+                    '_register_hook(model.trajectory_head.delta_mlp, "trajectory.delta_mlp", capture, handles)',
+                ],
+                forward_lines=["outputs = model(history_bev, agent_states, decode=False)"],
+            )
+        )
+    )
     return nb
-
-
-def _append_markdown_sections_with_chunks(
-    nb: nbf.NotebookNode,
-    md: str,
-    chunk_code: dict[int, str],
-) -> None:
-    sections = _split_markdown_sections(md)
-    chunk_ids_seen = set()
-    i = 0
-    while i < len(sections):
-        heading, body = sections[i]
-        full_md = (heading + "\n" + body).strip() if heading else body.strip()
-        chunk_id = _chunk_id_from_heading(heading)
-
-        if heading.startswith("## "):
-            sub_parts = [full_md]
-            j = i + 1
-            while j < len(sections):
-                h2, b2 = sections[j]
-                if h2.startswith("## "):
-                    break
-                sub_parts.append((h2 + "\n" + b2).strip())
-                j += 1
-            nb.cells.append(md_cell("\n\n".join(sub_parts)))
-            i = j
-        else:
-            if full_md:
-                nb.cells.append(md_cell(full_md))
-            i += 1
-
-        if chunk_id is not None and chunk_id not in chunk_ids_seen:
-            chunk_ids_seen.add(chunk_id)
-            if chunk_id in chunk_code:
-                nb.cells.append(code_cell(chunk_code[chunk_id]))
 
 
 def _make_prediction_beverse_notebook():
@@ -2056,28 +2041,26 @@ def _make_prediction_beverse_notebook():
     }
     _append_markdown_sections_with_chunks(nb, md, chunk_code)
 
-    nb.cells.append(code_cell("""\
-        # Final finite check with major hooks
-        capture, handles = {}, []
-        _register_hook(model.backbone_neck.backbone.stem, "backbone.stem", capture, handles)
-        for idx, stage in enumerate(model.backbone_neck.backbone.stages):
-            _register_hook(stage, f"backbone.stage{idx}", capture, handles)
-        _register_hook(model.backbone_neck.neck.output_convs[0], "fpn.output0", capture, handles)
-        _register_hook(model.bev_encoder[0], "bev_encoder.conv0", capture, handles)
-        _register_hook(model.bev_encoder[3], "bev_encoder.conv1", capture, handles)
-        _register_hook(model.temporal_predictor.time_embedding, "temporal.time_embedding", capture, handles)
-        _register_hook(model.temporal_predictor.gru, "temporal.gru", capture, handles)
-        _register_hook(model.trajectory_head.shared[1], "head.shared_fc0", capture, handles)
-        _register_hook(model.trajectory_head.delta_head, "head.delta", capture, handles)
-        _register_hook(model.trajectory_head.mode_head, "head.mode", capture, handles)
-
-        with torch.no_grad():
-            outputs = model(img, img_metas, decode=False)
-        for h in handles:
-            h.remove()
-
-        _check_finite(capture, outputs)
-    """))
+    nb.cells.append(
+        code_cell(
+            _build_final_finite_check_cell(
+                hook_lines=[
+                    '_register_hook(model.backbone_neck.backbone.stem, "backbone.stem", capture, handles)',
+                    "for idx, stage in enumerate(model.backbone_neck.backbone.stages):",
+                    '    _register_hook(stage, f"backbone.stage{idx}", capture, handles)',
+                    '_register_hook(model.backbone_neck.neck.output_convs[0], "fpn.output0", capture, handles)',
+                    '_register_hook(model.bev_encoder[0], "bev_encoder.conv0", capture, handles)',
+                    '_register_hook(model.bev_encoder[3], "bev_encoder.conv1", capture, handles)',
+                    '_register_hook(model.temporal_predictor.time_embedding, "temporal.time_embedding", capture, handles)',
+                    '_register_hook(model.temporal_predictor.gru, "temporal.gru", capture, handles)',
+                    '_register_hook(model.trajectory_head.shared[1], "head.shared_fc0", capture, handles)',
+                    '_register_hook(model.trajectory_head.delta_head, "head.delta", capture, handles)',
+                    '_register_hook(model.trajectory_head.mode_head, "head.mode", capture, handles)',
+                ],
+                forward_lines=["outputs = model(img, img_metas, decode=False)"],
+            )
+        )
+    )
     return nb
 
 
@@ -2233,26 +2216,24 @@ def _make_prediction_flashocc_notebook():
     }
     _append_markdown_sections_with_chunks(nb, md, chunk_code)
 
-    nb.cells.append(code_cell("""\
-        # Final finite check with major hooks
-        capture, handles = {}, []
-        _register_hook(model.backbone.stem, "backbone.stem", capture, handles)
-        for idx, block in enumerate(model.backbone.blocks):
-            _register_hook(block, f"backbone.block{idx}", capture, handles)
-        _register_hook(model.temporal_mixer.temporal_conv, "temporal.temporal_conv", capture, handles)
-        _register_hook(model.temporal_mixer.proj, "temporal.proj", capture, handles)
-        _register_hook(model.prediction_head.query_proj, "head.query_proj", capture, handles)
-        _register_hook(model.prediction_head.cross_attn, "head.cross_attn", capture, handles)
-        _register_hook(model.prediction_head.traj_head, "head.traj_head", capture, handles)
-        _register_hook(model.prediction_head.mode_head, "head.mode_head", capture, handles)
-
-        with torch.no_grad():
-            outputs = model(occ_seq, decode=False)
-        for h in handles:
-            h.remove()
-
-        _check_finite(capture, outputs)
-    """))
+    nb.cells.append(
+        code_cell(
+            _build_final_finite_check_cell(
+                hook_lines=[
+                    '_register_hook(model.backbone.stem, "backbone.stem", capture, handles)',
+                    "for idx, block in enumerate(model.backbone.blocks):",
+                    '    _register_hook(block, f"backbone.block{idx}", capture, handles)',
+                    '_register_hook(model.temporal_mixer.temporal_conv, "temporal.temporal_conv", capture, handles)',
+                    '_register_hook(model.temporal_mixer.proj, "temporal.proj", capture, handles)',
+                    '_register_hook(model.prediction_head.query_proj, "head.query_proj", capture, handles)',
+                    '_register_hook(model.prediction_head.cross_attn, "head.cross_attn", capture, handles)',
+                    '_register_hook(model.prediction_head.traj_head, "head.traj_head", capture, handles)',
+                    '_register_hook(model.prediction_head.mode_head, "head.mode_head", capture, handles)',
+                ],
+                forward_lines=["outputs = model(occ_seq, decode=False)"],
+            )
+        )
+    )
     return nb
 
 
@@ -2417,27 +2398,25 @@ def _make_prediction_vip3d_notebook():
     }
     _append_markdown_sections_with_chunks(nb, md, chunk_code)
 
-    nb.cells.append(code_cell("""\
-        # Final finite check with major hooks
-        capture, handles = {}, []
-        _register_hook(model.history_input_proj, "history.input_proj", capture, handles)
-        _register_hook(model.history_encoder.layers[0], "history.encoder.layer0", capture, handles)
-        _register_hook(model.history_norm, "history.norm", capture, handles)
-        _register_hook(model.map_point_mlp, "map.point_mlp", capture, handles)
-        _register_hook(model.map_token_proj, "map.token_proj", capture, handles)
-        _register_hook(model.agent_map_attention, "fusion.cross_attention", capture, handles)
-        _register_hook(model.fusion_norm, "fusion.norm", capture, handles)
-        _register_hook(model.decoder.trunk, "decoder.trunk", capture, handles)
-        _register_hook(model.decoder.mode_head, "decoder.mode_head", capture, handles)
-        _register_hook(model.decoder.delta_head, "decoder.delta_head", capture, handles)
-
-        with torch.no_grad():
-            outputs = model(agent_history, map_polylines, agent_valid)
-        for h in handles:
-            h.remove()
-
-        _check_finite(capture, outputs)
-    """))
+    nb.cells.append(
+        code_cell(
+            _build_final_finite_check_cell(
+                hook_lines=[
+                    '_register_hook(model.history_input_proj, "history.input_proj", capture, handles)',
+                    '_register_hook(model.history_encoder.layers[0], "history.encoder.layer0", capture, handles)',
+                    '_register_hook(model.history_norm, "history.norm", capture, handles)',
+                    '_register_hook(model.map_point_mlp, "map.point_mlp", capture, handles)',
+                    '_register_hook(model.map_token_proj, "map.token_proj", capture, handles)',
+                    '_register_hook(model.agent_map_attention, "fusion.cross_attention", capture, handles)',
+                    '_register_hook(model.fusion_norm, "fusion.norm", capture, handles)',
+                    '_register_hook(model.decoder.trunk, "decoder.trunk", capture, handles)',
+                    '_register_hook(model.decoder.mode_head, "decoder.mode_head", capture, handles)',
+                    '_register_hook(model.decoder.delta_head, "decoder.delta_head", capture, handles)',
+                ],
+                forward_lines=["outputs = model(agent_history, map_polylines, agent_valid)"],
+            )
+        )
+    )
     return nb
 
 

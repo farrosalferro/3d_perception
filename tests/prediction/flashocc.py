@@ -20,44 +20,24 @@ from pytorch_implementation.prediction.flashocc.metrics import (
     trajectory_smoothness_l2,
 )
 from pytorch_implementation.prediction.flashocc.model import FlashOccLite
+from tests._shared.hook_helpers import register_hook_overwrite
+from tests._shared.tensor_helpers import conv2d_out, first_tensor, iter_tensors
 
 
 def _first_tensor(value: Any) -> torch.Tensor | None:
-    if torch.is_tensor(value):
-        return value
-    if isinstance(value, (tuple, list)):
-        for item in value:
-            tensor = _first_tensor(item)
-            if tensor is not None:
-                return tensor
-    if isinstance(value, dict):
-        for item in value.values():
-            tensor = _first_tensor(item)
-            if tensor is not None:
-                return tensor
-    return None
+    return first_tensor(value)
 
 
 def _iter_tensors(value: Any):
-    if torch.is_tensor(value):
-        yield value
-    elif isinstance(value, (tuple, list)):
-        for item in value:
-            yield from _iter_tensors(item)
-    elif isinstance(value, dict):
-        for item in value.values():
-            yield from _iter_tensors(item)
+    yield from iter_tensors(value)
 
 
 def _register_hook(module, name: str, capture: dict[str, Any], handles: list) -> None:
-    def _hook(_module, _inputs, output):
-        capture[name] = output
-
-    handles.append(module.register_forward_hook(_hook))
+    register_hook_overwrite(module, name, capture, handles)
 
 
 def _conv2d_out(size: int, kernel: int, stride: int, padding: int) -> int:
-    return ((size + 2 * padding - kernel) // stride) + 1
+    return conv2d_out(size, kernel, stride, padding)
 
 
 def _identity_history_to_key(

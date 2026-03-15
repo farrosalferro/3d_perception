@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from ...common.postprocess.gather import gather_mode_trajectories
 from .config import BEVerseForwardConfig
 
 
@@ -101,8 +102,7 @@ class TrajectoryHeadLite(nn.Module):
         ade_per_mode = (l2_per_step * mask_bmt).sum(dim=-1) / denom
         best_mode_idx = ade_per_mode.argmin(dim=-1)
 
-        gather_index = best_mode_idx.view(batch_size, 1, 1, 1).expand(-1, 1, horizon, 2)
-        best_traj = pred_modes.gather(dim=1, index=gather_index).squeeze(1)
+        best_traj = gather_mode_trajectories(pred_modes, best_mode_idx, mode_dim=1).squeeze(1)
 
         l1_per_step = (best_traj - target).abs().sum(dim=-1)
         reg_loss = (l1_per_step * mask_bt).sum() / mask_bt.sum().clamp_min(1.0)
@@ -129,8 +129,7 @@ class TrajectoryHeadLite(nn.Module):
 
         topk = min(self.cfg.decode_topk, num_modes)
         topk_mode_prob, topk_mode_idx = torch.topk(mode_probs, k=topk, dim=-1)
-        gather_topk = topk_mode_idx.view(batch_size, topk, 1, 1).expand(-1, -1, horizon, 2)
-        topk_trajectory = trajectory_preds.gather(dim=1, index=gather_topk)
+        topk_trajectory = gather_mode_trajectories(trajectory_preds, topk_mode_idx, mode_dim=1)
 
         best_mode_idx = topk_mode_idx[:, 0]
         best_mode_prob = topk_mode_prob[:, 0]

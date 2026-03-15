@@ -51,6 +51,7 @@ conda activate 3d_perception
 | 2026-03-15 | Unsupported prediction model removed from scope | Deleted unsupported prediction-model implementation/tests/study artifacts and updated notebook generation to 11-model output. |
 | 2026-03-15 | Strict-parity artifact sync completed | Added frozen anchor and contract docs (`study/markdown/strict_parity_anchor_manifest.md`, `study/markdown/strict_parity_contracts.md`), regenerated all 11 notebooks, and published parity matrix `study/markdown/strict_parity_matrix.md`. |
 | 2026-03-15 | Full strict-parity validation pass | Ran `pytest tests/perception/*.py tests/prediction/*.py -q` in `3d_perception` env (`67 passed`). |
+| 2026-03-15 | Cross-model duplicate refactor completed | Extracted shared pure-PyTorch modules for numerics/positional encodings, backbone+FPN, metadata validators (profile adapters), decode/top-k helpers, prediction time/metric kernels, test helper utilities, and notebook builder primitives while preserving legacy import paths via wrappers/re-exports; validated with strict suite (`67 passed`), notebook regeneration (`11/11`), and explicit import compatibility smoke checks. |
 
 ## Entry Template
 

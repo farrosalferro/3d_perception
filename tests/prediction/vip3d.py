@@ -10,24 +10,16 @@ torch = pytest.importorskip("torch")
 
 from pytorch_implementation.prediction.vip3d.config import debug_forward_config
 from pytorch_implementation.prediction.vip3d.model import VIP3DLite, compute_ade_fde
+from tests._shared.hook_helpers import register_hook_overwrite
+from tests._shared.tensor_helpers import iter_tensors
 
 
 def _iter_tensors(value: Any):
-    if torch.is_tensor(value):
-        yield value
-    elif isinstance(value, (tuple, list)):
-        for item in value:
-            yield from _iter_tensors(item)
-    elif isinstance(value, dict):
-        for item in value.values():
-            yield from _iter_tensors(item)
+    yield from iter_tensors(value)
 
 
 def _register_hook(module, name: str, capture: dict[str, Any], handles: list) -> None:
-    def _hook(_module, _inputs, output):
-        capture[name] = output
-
-    handles.append(module.register_forward_hook(_hook))
+    register_hook_overwrite(module, name, capture, handles)
 
 
 def _build_debug_batch(cfg):

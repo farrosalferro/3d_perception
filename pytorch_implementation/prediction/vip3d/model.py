@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from ..common.time_contracts import ensure_strictly_increasing as _shared_ensure_strictly_increasing
 from .config import VIP3DConfig
 
 
@@ -51,12 +52,7 @@ def _as_batch_vector(
 
 def _ensure_strictly_increasing(indices: torch.Tensor, *, name: str) -> None:
     """Check strict monotonicity along the last dimension."""
-
-    if indices.shape[-1] <= 1:
-        return
-    diffs = indices[..., 1:] - indices[..., :-1]
-    if not torch.all(diffs > 0):
-        raise ValueError(f"{name} must be strictly increasing along time axis.")
+    _shared_ensure_strictly_increasing(indices, name=name)
 
 
 @dataclass

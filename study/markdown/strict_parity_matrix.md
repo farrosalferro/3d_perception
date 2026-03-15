@@ -49,3 +49,22 @@ Gate rule used: strict metadata contracts + intermediate tensor checks + decode/
 2. Expand prediction metrics from smoke-level checks to small deterministic regression baselines.
 3. Add cross-model CI command that always runs `pytest tests/perception/*.py tests/prediction/*.py -q`.
 4. Add lightweight benchmark script to track runtime/memory deltas introduced by strict parity hardening.
+
+## 5) Cross-Model Dedupe Refactor Update (2026-03-15)
+
+- **Shared runtime extractions**
+  - `pytorch_implementation/common/utils/{numerics.py,positional_encoding.py}`
+  - `pytorch_implementation/common/backbone/simple_backbone_fpn.py`
+  - `pytorch_implementation/common/meta/validators.py`
+  - `pytorch_implementation/common/postprocess/{gather.py,nms_free.py}`
+  - `pytorch_implementation/prediction/common/{time_contracts.py,trajectory_metrics.py}`
+- **Compatibility strategy**
+  - Original per-model import paths preserved through wrapper/re-export modules in existing model packages.
+  - Decode and metadata behavior differences are controlled via profile-style adapters, not hard-coded model branching in shared utilities.
+- **Test/tooling dedupe**
+  - Shared helpers added under `tests/_shared/`.
+  - Notebook generator helpers consolidated and duplicate markdown chunk appender removed.
+- **Validation evidence**
+  - `pytest tests/perception/*.py tests/prediction/*.py -q` -> `67 passed`
+  - `python3 study/notebook/_generate_notebooks.py` -> `11/11` notebooks generated
+  - Legacy-path import compatibility smoke script -> `import compatibility OK`

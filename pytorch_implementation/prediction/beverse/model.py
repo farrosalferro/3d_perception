@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 import torch
 from torch import nn
 
+from ..common.time_contracts import resolve_time_indices
 from .backbone_neck import BackboneNeck
 from .config import BEVerseForwardConfig
 from .head import MultiTaskHeadLite, TrajectoryHeadLite
@@ -190,27 +191,23 @@ class BEVerseLite(nn.Module):
         dtype: torch.dtype,
         img_metas: list[dict[str, Any]] | None,
     ) -> torch.Tensor:
+        values: Sequence[float] | None = None
         if img_metas and "future_time_stamps" in img_metas[0]:
-            values = img_metas[0]["future_time_stamps"]
-            if isinstance(values, (list, tuple)) and len(values) >= self.cfg.pred_horizon:
-                time_stamps = torch.as_tensor(
-                    values[: self.cfg.pred_horizon],
-                    device=device,
-                    dtype=dtype,
-                )
-            else:
+            raw_values = img_metas[0]["future_time_stamps"]
+            if not isinstance(raw_values, (list, tuple)) or len(raw_values) < self.cfg.pred_horizon:
                 raise ValueError(
                     "img_metas[0]['future_time_stamps'] must be list/tuple with pred_horizon entries."
                 )
-        else:
-            time_stamps = (
-                torch.arange(1, self.cfg.pred_horizon + 1, device=device, dtype=dtype)
-                * self.cfg.future_dt
-            )
-        if self.cfg.strict_meta_validation and time_stamps.numel() > 1:
-            if not bool(torch.all(time_stamps[1:] > time_stamps[:-1])):
-                raise ValueError("time_stamps must be strictly increasing.")
-        return time_stamps
+            values = raw_values[: self.cfg.pred_horizon]
+        return resolve_time_indices(
+            values,
+            expected_steps=self.cfg.pred_horizon,
+            device=device,
+            dtype=dtype,
+            name="future_time_stamps",
+            default_dt=self.cfg.future_dt,
+            require_strictly_increasing=self.cfg.strict_meta_validation,
+        )
 
     def forward(
         self,

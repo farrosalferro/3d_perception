@@ -25,6 +25,17 @@ Prediction models must validate temporal axis semantics:
 - monotonic time indices for future rollouts,
 - finite trajectory and occupancy outputs before decode.
 
+## Shared-Module Compatibility Contract
+
+- Cross-model deduped helpers may be centralized under:
+  - `pytorch_implementation/common/*`
+  - `pytorch_implementation/prediction/common/*`
+- Existing model-local import paths must remain valid; wrappers/re-exports must preserve:
+  - symbol names,
+  - call signatures,
+  - decode key schemas.
+- Any model-specific semantics that differ in subtle ways (e.g., threshold inclusivity, top-k clipping, metadata strictness) must be represented via profile/adaptor parameters in shared helpers rather than silently normalized.
+
 ## Per-Model Strict Contracts
 
 ### `perception/bevformer`

@@ -5,6 +5,8 @@ from __future__ import annotations
 import torch
 from torch import nn
 
+from ...common.postprocess.gather import gather_mode_trajectories
+from ..common.time_contracts import build_time_axis
 from .config import FlashOccConfig
 
 
@@ -64,7 +66,12 @@ class FlashOccPredictionHead(nn.Module):
         self.occupancy_head = FlashOccOccupancyHead(cfg)
 
     def _build_time_axis(self, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-        return torch.arange(1, self.cfg.pred_horizon + 1, device=device, dtype=dtype) * self.cfg.dt
+        return build_time_axis(
+            num_steps=self.cfg.pred_horizon,
+            device=device,
+            dtype=dtype,
+            dt=self.cfg.dt,
+        )
 
     def forward(self, bev_fused: torch.Tensor) -> dict[str, torch.Tensor]:
         if bev_fused.dim() != 4:
@@ -94,14 +101,11 @@ class FlashOccPredictionHead(nn.Module):
         occupancy_logits = self.occupancy_head(bev_fused)
         occupancy_probs = occupancy_logits.softmax(dim=-1)
         best_mode_scores, best_mode_indices = mode_logits.softmax(dim=-1).max(dim=-1)
-        best_index = best_mode_indices.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(
-            -1,
-            -1,
-            1,
-            self.cfg.pred_horizon,
-            2,
-        )
-        best_trajectory = torch.gather(traj_positions, dim=2, index=best_index).squeeze(2)
+        best_trajectory = gather_mode_trajectories(
+            traj_positions,
+            best_mode_indices,
+            mode_dim=2,
+        ).squeeze(2)
         return {
             "query_tokens": query_tokens,
             "anchor_xy": anchor_xy,

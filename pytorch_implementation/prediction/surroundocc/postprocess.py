@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import torch
 
+from ..common.time_contracts import resolve_time_indices
+
 
 def _resolve_future_time_indices(
     future_time_indices: torch.Tensor | None,
@@ -13,31 +15,17 @@ def _resolve_future_time_indices(
     device: torch.device,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    if future_time_indices is None:
-        return torch.arange(1, future_steps + 1, device=device, dtype=dtype).unsqueeze(0).expand(batch_size, -1)
-
-    if not torch.is_tensor(future_time_indices):
+    if future_time_indices is not None and not torch.is_tensor(future_time_indices):
         raise TypeError("future_time_indices in outputs must be a tensor when provided.")
-    tensor = future_time_indices.to(device=device, dtype=dtype)
-    if tensor.dim() == 1:
-        if tensor.shape[0] != future_steps:
-            raise ValueError(
-                f"future_time_indices must have length={future_steps}, got {tuple(tensor.shape)}."
-            )
-        tensor = tensor.unsqueeze(0).expand(batch_size, -1)
-    elif tensor.dim() == 2:
-        if tensor.shape != (batch_size, future_steps):
-            raise ValueError(
-                f"future_time_indices must have shape {(batch_size, future_steps)}, got {tuple(tensor.shape)}."
-            )
-    else:
-        raise ValueError(f"future_time_indices must be 1D or 2D, got {tuple(tensor.shape)}.")
-
-    if not torch.isfinite(tensor).all():
-        raise ValueError("future_time_indices must be finite.")
-    if torch.any(tensor[:, 1:] - tensor[:, :-1] <= 0):
-        raise ValueError("future_time_indices must be strictly increasing.")
-    return tensor
+    return resolve_time_indices(
+        future_time_indices,
+        expected_steps=future_steps,
+        device=device,
+        dtype=dtype,
+        name="future_time_indices",
+        batch_size=batch_size,
+        require_strictly_increasing=True,
+    )
 
 
 def decode_predictions(

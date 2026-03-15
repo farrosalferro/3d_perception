@@ -6,52 +6,22 @@ import math
 from typing import Any, Sequence
 
 import torch
-from torch import nn
+
+from ...common.meta.validators import (
+    CameraMetaProfile,
+    stack_camera_matrices as _shared_stack_camera_matrices,
+    validate_camera_img_metas,
+)
+from ...common.utils.numerics import inverse_sigmoid as _shared_inverse_sigmoid
+from ...common.utils.positional_encoding import SinePositionalEncoding2D
 
 
 def inverse_sigmoid(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
     """Numerically stable inverse sigmoid."""
-
-    x = x.clamp(min=0.0, max=1.0)
-    x1 = x.clamp(min=eps)
-    x2 = (1.0 - x).clamp(min=eps)
-    return torch.log(x1 / x2)
+    return _shared_inverse_sigmoid(x, eps=eps)
 
 
-def _shape_hw(
-    shape: Any,
-    *,
-    field_name: str,
-    batch_idx: int,
-    cam_idx: int,
-) -> tuple[int, int]:
-    if not isinstance(shape, (list, tuple)) or len(shape) < 2:
-        raise ValueError(
-            f"img_metas[{batch_idx}]['{field_name}'][{cam_idx}] must be a sequence"
-            f" with at least (H, W), got {shape!r}."
-        )
-    h, w = int(shape[0]), int(shape[1])
-    if h <= 0 or w <= 0:
-        raise ValueError(
-            f"img_metas[{batch_idx}]['{field_name}'][{cam_idx}] has non-positive size {(h, w)}."
-        )
-    return h, w
-
-
-def _validate_matrix_shape(
-    matrix: Any,
-    *,
-    field_name: str,
-    batch_idx: int,
-    cam_idx: int,
-    expected_shape: tuple[int, int],
-) -> None:
-    matrix_tensor = torch.as_tensor(matrix)
-    if tuple(matrix_tensor.shape) != expected_shape:
-        raise ValueError(
-            f"img_metas[{batch_idx}]['{field_name}'][{cam_idx}] must be {expected_shape}, "
-            f"got {tuple(matrix_tensor.shape)}."
-        )
+_POLARFORMER_BASE_KEYS: tuple[str, ...] = ("img_shape",)
 
 
 def validate_polarformer_img_metas(
@@ -63,96 +33,26 @@ def validate_polarformer_img_metas(
     require_geometry: bool = True,
 ) -> None:
     """Validate the subset of `img_metas` contract used by PolarFormer forward."""
-
-    if not isinstance(img_metas, list):
-        raise TypeError(f"img_metas must be a list[dict], got {type(img_metas)}.")
-    if not img_metas:
-        raise ValueError("img_metas must not be empty.")
-    if batch_size is not None and len(img_metas) != batch_size:
-        raise ValueError(f"img_metas length {len(img_metas)} does not match batch size {batch_size}.")
-
-    for batch_idx, meta in enumerate(img_metas):
-        if not isinstance(meta, dict):
-            raise TypeError(f"img_metas[{batch_idx}] must be a dict, got {type(meta)}.")
-        if "img_shape" not in meta:
-            raise KeyError(f"img_metas[{batch_idx}] is missing required key 'img_shape'.")
-        if strict_img_meta and "pad_shape" not in meta:
-            raise KeyError(f"img_metas[{batch_idx}] is missing required key 'pad_shape'.")
-        if require_geometry:
-            for field_name in ("lidar2img", "cam_intrinsic", "cam2lidar"):
-                if field_name not in meta:
-                    raise KeyError(f"img_metas[{batch_idx}] is missing required key '{field_name}'.")
-
-        img_shapes = meta["img_shape"]
-        pad_shapes = meta.get("pad_shape", img_shapes)
-        if not isinstance(img_shapes, (list, tuple)):
-            raise TypeError(f"img_metas[{batch_idx}]['img_shape'] must be a sequence, got {type(img_shapes)}.")
-        if not isinstance(pad_shapes, (list, tuple)):
-            raise TypeError(f"img_metas[{batch_idx}]['pad_shape'] must be a sequence, got {type(pad_shapes)}.")
-
-        expected_num_cams = int(num_cams) if num_cams is not None else len(img_shapes)
-        if len(img_shapes) != expected_num_cams:
-            raise ValueError(
-                f"img_metas[{batch_idx}]['img_shape'] has {len(img_shapes)} cameras, expected {expected_num_cams}."
-            )
-        if len(pad_shapes) != expected_num_cams:
-            raise ValueError(
-                f"img_metas[{batch_idx}]['pad_shape'] has {len(pad_shapes)} cameras, expected {expected_num_cams}."
-            )
-
-        for cam_idx in range(expected_num_cams):
-            img_h, img_w = _shape_hw(
-                img_shapes[cam_idx], field_name="img_shape", batch_idx=batch_idx, cam_idx=cam_idx
-            )
-            pad_h, pad_w = _shape_hw(
-                pad_shapes[cam_idx], field_name="pad_shape", batch_idx=batch_idx, cam_idx=cam_idx
-            )
-            if strict_img_meta and (pad_h < img_h or pad_w < img_w):
-                raise ValueError(
-                    f"img_metas[{batch_idx}] pad_shape must be >= img_shape for cam {cam_idx}, "
-                    f"got pad={(pad_h, pad_w)} and img={(img_h, img_w)}."
-                )
-
-        if require_geometry:
-            lidar2img = meta["lidar2img"]
-            cam_intrinsic = meta["cam_intrinsic"]
-            cam2lidar = meta["cam2lidar"]
-            for field_name, values in (
-                ("lidar2img", lidar2img),
-                ("cam_intrinsic", cam_intrinsic),
-                ("cam2lidar", cam2lidar),
-            ):
-                if not isinstance(values, (list, tuple)):
-                    raise TypeError(
-                        f"img_metas[{batch_idx}]['{field_name}'] must be a sequence, got {type(values)}."
-                    )
-                if len(values) != expected_num_cams:
-                    raise ValueError(
-                        f"img_metas[{batch_idx}]['{field_name}'] has {len(values)} entries, "
-                        f"expected {expected_num_cams}."
-                    )
-
-            for cam_idx in range(expected_num_cams):
-                _validate_matrix_shape(
-                    lidar2img[cam_idx],
-                    field_name="lidar2img",
-                    batch_idx=batch_idx,
-                    cam_idx=cam_idx,
-                    expected_shape=(4, 4),
-                )
-                _validate_matrix_shape(
-                    cam2lidar[cam_idx],
-                    field_name="cam2lidar",
-                    batch_idx=batch_idx,
-                    cam_idx=cam_idx,
-                    expected_shape=(4, 4),
-                )
-                intr = torch.as_tensor(cam_intrinsic[cam_idx])
-                if intr.ndim != 2 or intr.shape[0] < 3 or intr.shape[1] < 3:
-                    raise ValueError(
-                        f"img_metas[{batch_idx}]['cam_intrinsic'][{cam_idx}] must be at least 3x3, "
-                        f"got {tuple(intr.shape)}."
-                    )
+    required_keys = list(_POLARFORMER_BASE_KEYS)
+    matrix_exact_shapes: dict[str, tuple[int, int]] = {}
+    matrix_min_shapes: dict[str, tuple[int, int]] = {}
+    if require_geometry:
+        required_keys.extend(["lidar2img", "cam_intrinsic", "cam2lidar"])
+        matrix_exact_shapes = {"lidar2img": (4, 4), "cam2lidar": (4, 4)}
+        matrix_min_shapes = {"cam_intrinsic": (3, 3)}
+    profile = CameraMetaProfile(
+        required_keys=tuple(required_keys),
+        require_pad_shape=strict_img_meta,
+        enforce_pad_greater_equal_img=strict_img_meta,
+        matrix_exact_shapes=matrix_exact_shapes,
+        matrix_min_shapes=matrix_min_shapes,
+    )
+    validate_camera_img_metas(
+        img_metas,
+        profile=profile,
+        batch_size=batch_size,
+        num_cams=num_cams,
+    )
 
 
 def stack_camera_matrices(
@@ -165,27 +65,14 @@ def stack_camera_matrices(
     expected_shape: tuple[int, int],
 ) -> torch.Tensor:
     """Build [B, Ncam, H, W] camera matrix tensor from `img_metas`."""
-
-    stacked: list[torch.Tensor] = []
-    for batch_idx, meta in enumerate(img_metas):
-        if field_name not in meta:
-            raise KeyError(f"img_metas[{batch_idx}] is missing required key '{field_name}'.")
-        values = meta[field_name]
-        if not isinstance(values, (list, tuple)) or len(values) != num_cams:
-            raise ValueError(
-                f"img_metas[{batch_idx}]['{field_name}'] must have {num_cams} entries, got {values!r}."
-            )
-        per_cam = []
-        for cam_idx in range(num_cams):
-            matrix = torch.as_tensor(values[cam_idx], device=device, dtype=dtype)
-            if tuple(matrix.shape) != expected_shape:
-                raise ValueError(
-                    f"img_metas[{batch_idx}]['{field_name}'][{cam_idx}] must be {expected_shape}, "
-                    f"got {tuple(matrix.shape)}."
-                )
-            per_cam.append(matrix)
-        stacked.append(torch.stack(per_cam, dim=0))
-    return torch.stack(stacked, dim=0)
+    return _shared_stack_camera_matrices(
+        img_metas,
+        field_name=field_name,
+        num_cams=num_cams,
+        device=device,
+        dtype=dtype,
+        expected_shape=expected_shape,
+    )
 
 
 def denormalize_bbox(normalized_bboxes: torch.Tensor, pc_range: Sequence[float]) -> torch.Tensor:
@@ -221,45 +108,4 @@ def denormalize_bbox(normalized_bboxes: torch.Tensor, pc_range: Sequence[float])
     return torch.cat((cx, cy, cz, w, l, h, rot), dim=-1)
 
 
-class SinePositionalEncoding2D(nn.Module):
-    """2D sine positional encoding from a boolean mask."""
-
-    def __init__(
-        self,
-        num_feats: int,
-        *,
-        temperature: int = 10000,
-        normalize: bool = True,
-        scale: float = 2.0 * math.pi,
-    ) -> None:
-        super().__init__()
-        self.num_feats = num_feats
-        self.temperature = temperature
-        self.normalize = normalize
-        self.scale = scale
-
-    def forward(self, mask: torch.Tensor) -> torch.Tensor:
-        """Return [B, 2*num_feats, H, W] encoding from [B, H, W] mask."""
-
-        if mask.dim() != 3:
-            raise ValueError(f"mask must have shape [B, H, W], got {tuple(mask.shape)}")
-        if mask.dtype != torch.bool:
-            mask = mask.to(torch.bool)
-
-        not_mask = ~mask
-        y_embed = not_mask.cumsum(1, dtype=torch.float32)
-        x_embed = not_mask.cumsum(2, dtype=torch.float32)
-        if self.normalize:
-            eps = 1e-6
-            y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
-            x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
-
-        dim_t = torch.arange(self.num_feats, dtype=torch.float32, device=mask.device)
-        dim_t = self.temperature ** (2 * torch.div(dim_t, 2, rounding_mode="floor") / self.num_feats)
-        pos_x = x_embed[..., None] / dim_t
-        pos_y = y_embed[..., None] / dim_t
-        pos_x = torch.stack((pos_x[..., 0::2].sin(), pos_x[..., 1::2].cos()), dim=-1).flatten(-2)
-        pos_y = torch.stack((pos_y[..., 0::2].sin(), pos_y[..., 1::2].cos()), dim=-1).flatten(-2)
-        pos = torch.cat((pos_y, pos_x), dim=-1)
-        return pos.permute(0, 3, 1, 2).contiguous()
 

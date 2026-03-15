@@ -11,6 +11,9 @@ torch = pytest.importorskip("torch")
 
 from pytorch_implementation.perception.fbbev.config import debug_forward_config
 from pytorch_implementation.perception.fbbev.model import FBBEVLite
+from tests._shared.hook_helpers import register_hook_overwrite
+from tests._shared.parity_helpers import assert_decoded_topk_label_score_consistency
+from tests._shared.tensor_helpers import conv2d_out, first_tensor, iter_tensors
 
 
 def _build_dummy_img_metas(batch_size: int) -> list[dict[str, Any]]:
@@ -31,37 +34,15 @@ def _build_dummy_img_metas(batch_size: int) -> list[dict[str, Any]]:
 
 
 def _first_tensor(value: Any) -> torch.Tensor | None:
-    if torch.is_tensor(value):
-        return value
-    if isinstance(value, (tuple, list)):
-        for item in value:
-            tensor = _first_tensor(item)
-            if tensor is not None:
-                return tensor
-    if isinstance(value, dict):
-        for item in value.values():
-            tensor = _first_tensor(item)
-            if tensor is not None:
-                return tensor
-    return None
+    return first_tensor(value)
 
 
 def _iter_tensors(value: Any):
-    if torch.is_tensor(value):
-        yield value
-    elif isinstance(value, (tuple, list)):
-        for item in value:
-            yield from _iter_tensors(item)
-    elif isinstance(value, dict):
-        for item in value.values():
-            yield from _iter_tensors(item)
+    yield from iter_tensors(value)
 
 
 def _register_hook(module, name: str, capture: dict[str, Any], handles: list) -> None:
-    def _hook(_module, _inputs, output):
-        capture[name] = output
-
-    handles.append(module.register_forward_hook(_hook))
+    register_hook_overwrite(module, name, capture, handles)
 
 
 def _assert_decoded_topk_label_score_consistency(
@@ -72,36 +53,17 @@ def _assert_decoded_topk_label_score_consistency(
     max_num: int,
     num_classes: int,
 ) -> None:
-    flat_scores = cls_scores.sigmoid().reshape(-1)
-    topk = min(int(max_num), int(flat_scores.numel()))
-    topk_scores, topk_indices = flat_scores.topk(topk)
-    topk_labels = (topk_indices % num_classes).to(dtype=torch.long)
-
-    assert decoded_scores.ndim == 1
-    assert decoded_labels.ndim == 1
-    assert decoded_scores.shape[0] == decoded_labels.shape[0]
-    assert decoded_scores.shape[0] <= topk
-    if decoded_scores.numel() > 1:
-        assert torch.all(decoded_scores[:-1] >= decoded_scores[1:])
-    assert torch.all((decoded_scores >= 0.0) & (decoded_scores <= 1.0))
-    if decoded_labels.numel() > 0:
-        assert decoded_labels.dtype == torch.long
-        assert int(decoded_labels.min().item()) >= 0
-        assert int(decoded_labels.max().item()) < num_classes
-
-    remaining = [(float(score), int(label)) for score, label in zip(topk_scores.tolist(), topk_labels.tolist())]
-    for score, label in zip(decoded_scores.tolist(), decoded_labels.tolist()):
-        matched_idx = None
-        for idx, (candidate_score, candidate_label) in enumerate(remaining):
-            if candidate_label == int(label) and abs(candidate_score - float(score)) <= 1e-6:
-                matched_idx = idx
-                break
-        assert matched_idx is not None, "Decoded score/label pair is inconsistent with top-k logits."
-        remaining.pop(matched_idx)
+    assert_decoded_topk_label_score_consistency(
+        cls_scores,
+        decoded_scores,
+        decoded_labels,
+        max_num=max_num,
+        num_classes=num_classes,
+    )
 
 
 def _conv2d_out(size: int, kernel: int, stride: int, padding: int) -> int:
-    return ((size + 2 * padding - kernel) // stride) + 1
+    return conv2d_out(size, kernel, stride, padding)
 
 
 @pytest.fixture()

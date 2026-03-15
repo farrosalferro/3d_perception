@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 import nbformat as nbf
 
+try:
+    from .._builder_primitives import new_notebook as _shared_new_notebook
+except ImportError:  # pragma: no cover - script execution fallback
+    NOTEBOOK_ROOT = Path(__file__).resolve().parents[1]
+    if str(NOTEBOOK_ROOT) not in sys.path:
+        sys.path.insert(0, str(NOTEBOOK_ROOT))
+    from _builder_primitives import new_notebook as _shared_new_notebook
+
 
 def build_notebook(markdown_source: str) -> nbf.NotebookNode:
-    nb = nbf.v4.new_notebook()
-    nb.metadata["kernelspec"] = {
-        "display_name": "Python 3 (3d_perception)",
-        "language": "python",
-        "name": "python3",
-    }
-    nb.metadata["language_info"] = {"name": "python"}
+    nb = _shared_new_notebook()
 
     setup_code = """\
 import os, sys

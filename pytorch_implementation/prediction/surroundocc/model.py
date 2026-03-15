@@ -8,6 +8,10 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from ..common.time_contracts import (
+    resolve_time_indices as _shared_resolve_time_indices,
+    time_deltas_from_indices as _shared_time_deltas_from_indices,
+)
 from .config import SurroundOccPredictionConfig
 from .postprocess import decode_predictions
 
@@ -28,28 +32,18 @@ def _coerce_time_indices(
     dtype: torch.dtype,
     name: str,
 ) -> torch.Tensor:
-    if time_indices is None:
-        return torch.arange(1, expected_steps + 1, device=device, dtype=dtype)
-
-    tensor = (
-        time_indices.to(device=device, dtype=dtype)
-        if torch.is_tensor(time_indices)
-        else torch.as_tensor(time_indices, device=device, dtype=dtype)
+    return _shared_resolve_time_indices(
+        time_indices,
+        expected_steps=expected_steps,
+        device=device,
+        dtype=dtype,
+        name=name,
+        require_strictly_increasing=True,
     )
-    if tensor.dim() not in (1, 2):
-        raise ValueError(f"{name} must be 1D or 2D, got {tuple(tensor.shape)}.")
-    if tensor.shape[-1] != expected_steps:
-        raise ValueError(f"{name} must have length={expected_steps}, got {tuple(tensor.shape)}.")
-    if not torch.isfinite(tensor).all():
-        raise ValueError(f"{name} must contain only finite values.")
-    if torch.any(tensor[..., 1:] - tensor[..., :-1] <= 0):
-        raise ValueError(f"{name} must be strictly increasing along the time axis.")
-    return tensor
 
 
 def _time_deltas_from_indices(time_indices: torch.Tensor) -> torch.Tensor:
-    deltas = torch.cat((time_indices[..., :1], time_indices[..., 1:] - time_indices[..., :-1]), dim=-1)
-    return deltas
+    return _shared_time_deltas_from_indices(time_indices)
 
 
 def _coerce_hw_pairs(

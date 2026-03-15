@@ -7,7 +7,16 @@ from typing import Sequence
 
 import torch
 
+from ....common.postprocess.nms_free import NMSFreeDecodeProfile, decode_nms_free_single
 from ..utils.boxes import denormalize_bbox
+
+_BEVFORMER_DECODE_PROFILE = NMSFreeDecodeProfile(
+    cap_topk_by_numel=False,
+    score_threshold_inclusive=False,
+    apply_threshold_mask_when_score_truthy=True,
+    relax_empty_threshold=True,
+    relax_min_threshold=0.01,
+)
 
 
 @dataclass
@@ -21,46 +30,15 @@ class NMSFreeCoderLite:
     num_classes: int = 10
 
     def decode_single(self, cls_scores: torch.Tensor, bbox_preds: torch.Tensor) -> dict[str, torch.Tensor]:
-        max_num = self.max_num
-        cls_scores = cls_scores.sigmoid()
-        scores, indices = cls_scores.view(-1).topk(max_num)
-        labels = indices % self.num_classes
-        bbox_indices = indices // self.num_classes
-        bbox_preds = bbox_preds[bbox_indices]
-
-        final_box_preds = denormalize_bbox(bbox_preds)
-        final_scores = scores
-        final_preds = labels
-
-        if self.score_threshold is not None:
-            thresh_mask = final_scores > self.score_threshold
-            tmp_score = self.score_threshold
-            while thresh_mask.sum() == 0:
-                tmp_score *= 0.9
-                if tmp_score < 0.01:
-                    thresh_mask = final_scores > -1
-                    break
-                thresh_mask = final_scores >= tmp_score
-
-        if self.post_center_range is not None:
-            post_center_range = torch.as_tensor(self.post_center_range, device=scores.device, dtype=final_box_preds.dtype)
-            mask = (final_box_preds[..., :3] >= post_center_range[:3]).all(dim=1)
-            mask &= (final_box_preds[..., :3] <= post_center_range[3:]).all(dim=1)
-            # Keep parity with upstream implementation: only apply threshold
-            # mask when score_threshold is truthy (e.g. non-zero float).
-            if self.score_threshold:
-                mask &= thresh_mask
-            boxes3d = final_box_preds[mask]
-            scores = final_scores[mask]
-            labels = final_preds[mask]
-            return {
-                "bboxes": boxes3d,
-                "scores": scores,
-                "labels": labels,
-            }
-        raise NotImplementedError(
-            "Need post_center_range for batched output reorganization; "
-            "this pure-PyTorch parity path matches upstream behavior."
+        return decode_nms_free_single(
+            cls_scores,
+            bbox_preds,
+            num_classes=self.num_classes,
+            max_num=self.max_num,
+            score_threshold=self.score_threshold,
+            post_center_range=self.post_center_range,
+            denormalize_bbox_fn=denormalize_bbox,
+            profile=_BEVFORMER_DECODE_PROFILE,
         )
 
     def decode(self, preds_dicts: dict[str, torch.Tensor]) -> list[dict[str, torch.Tensor]]:

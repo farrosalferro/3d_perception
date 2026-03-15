@@ -7,7 +7,14 @@ from typing import Sequence
 
 import torch
 
+from ...common.postprocess.nms_free import NMSFreeDecodeProfile, decode_nms_free_single
 from .utils import denormalize_bbox
+
+_PETR_DECODE_PROFILE = NMSFreeDecodeProfile(
+    cap_topk_by_numel=False,
+    score_threshold_inclusive=False,
+    apply_threshold_mask_when_score_truthy=True,
+)
 
 
 @dataclass
@@ -21,37 +28,15 @@ class NMSFreeCoderLite:
     score_threshold: float | None = None
 
     def decode_single(self, cls_scores: torch.Tensor, bbox_preds: torch.Tensor) -> dict[str, torch.Tensor]:
-        cls_scores = cls_scores.sigmoid()
-        scores, indexs = cls_scores.reshape(-1).topk(self.max_num)
-        labels = indexs % self.num_classes
-        bbox_indices = torch.div(indexs, self.num_classes, rounding_mode="floor")
-        bbox_preds = bbox_preds[bbox_indices]
-
-        final_box_preds = denormalize_bbox(bbox_preds, self.pc_range)
-        final_scores = scores
-        final_preds = labels
-
-        if self.score_threshold is not None:
-            thresh_mask = final_scores > self.score_threshold
-        if self.post_center_range is not None:
-            post_range = torch.as_tensor(
-                self.post_center_range,
-                dtype=final_box_preds.dtype,
-                device=final_box_preds.device,
-            )
-            mask = (final_box_preds[..., :3] >= post_range[:3]).all(dim=1)
-            mask &= (final_box_preds[..., :3] <= post_range[3:]).all(dim=1)
-            if self.score_threshold:
-                mask &= thresh_mask
-
-            predictions = {
-                "bboxes": final_box_preds[mask],
-                "scores": final_scores[mask],
-                "labels": final_preds[mask],
-            }
-            return predictions
-        raise NotImplementedError(
-            "Need post_center_range to reorganize output as a batch in NMSFreeCoderLite."
+        return decode_nms_free_single(
+            cls_scores,
+            bbox_preds,
+            num_classes=self.num_classes,
+            max_num=self.max_num,
+            score_threshold=self.score_threshold,
+            post_center_range=self.post_center_range,
+            denormalize_bbox_fn=lambda boxes: denormalize_bbox(boxes, self.pc_range),
+            profile=_PETR_DECODE_PROFILE,
         )
 
     def decode(self, preds_dicts: dict[str, torch.Tensor]) -> list[dict[str, torch.Tensor]]:
