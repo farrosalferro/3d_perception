@@ -10,15 +10,24 @@ from typing import Tuple
 class SurroundOccPredictionConfig:
     """Forward configuration for a SurroundOcc-style predictor."""
 
-    name: str = "surroundocc_prediction"
+    name: str = "prediction/surroundocc"
     history_steps: int = 4
     future_steps: int = 6
     num_agents: int = 8
+    num_cams: int = 6
     in_channels: int = 32
     embed_dims: int = 128
     bev_hw: Tuple[int, int] = (32, 32)
     depth_bins: int = 6
     occupancy_classes: int = 2
+    pc_range: Tuple[float, float, float, float, float, float] = (
+        -50.0,
+        -50.0,
+        -5.0,
+        50.0,
+        50.0,
+        3.0,
+    )
     dt: float = 0.5
     dropout: float = 0.1
 

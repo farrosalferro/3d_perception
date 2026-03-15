@@ -11,7 +11,7 @@ from torch import nn
 from .config import PolarFormerForwardConfig
 from .postprocess import NMSFreeCoderLite
 from .transformer import PolarTransformerLite
-from .utils import SinePositionalEncoding2D, inverse_sigmoid
+from .utils import SinePositionalEncoding2D, inverse_sigmoid, validate_polarformer_img_metas
 
 
 class PolarFormerHeadLite(nn.Module):
@@ -26,6 +26,7 @@ class PolarFormerHeadLite(nn.Module):
         self.num_query = cfg.num_queries
         self.code_size = cfg.code_size
         self.radius_range = cfg.polar_neck.radius_range
+        self.with_box_refine = cfg.with_box_refine
 
         self.input_projs = nn.ModuleList(
             [nn.Conv2d(cfg.backbone_neck.out_channels, self.embed_dims, kernel_size=1) for _ in range(cfg.polar_neck.num_levels)]
@@ -35,6 +36,7 @@ class PolarFormerHeadLite(nn.Module):
         self.cls_branches, self.reg_branches = self._build_branches(cfg.num_decoder_layers)
 
         self.bbox_coder = NMSFreeCoderLite(
+            pc_range=cfg.pc_range,
             post_center_range=cfg.post_center_range,
             max_num=cfg.max_num,
             num_classes=cfg.num_classes,
@@ -58,17 +60,27 @@ class PolarFormerHeadLite(nn.Module):
             nn.ReLU(inplace=True),
             nn.Linear(self.embed_dims, self.code_size),
         )
-        return (
-            nn.ModuleList([copy.deepcopy(cls_branch) for _ in range(num_pred)]),
-            nn.ModuleList([copy.deepcopy(reg_branch) for _ in range(num_pred)]),
-        )
+        if self.with_box_refine:
+            cls_branches = nn.ModuleList([copy.deepcopy(cls_branch) for _ in range(num_pred)])
+            reg_branches = nn.ModuleList([copy.deepcopy(reg_branch) for _ in range(num_pred)])
+        else:
+            cls_branches = nn.ModuleList([cls_branch for _ in range(num_pred)])
+            reg_branches = nn.ModuleList([reg_branch for _ in range(num_pred)])
+        return cls_branches, reg_branches
 
     def forward(self, mlvl_feats: list[torch.Tensor], img_metas: list[dict]) -> dict[str, torch.Tensor]:
         if len(mlvl_feats) != len(self.input_projs):
             raise ValueError(
                 f"Expected {len(self.input_projs)} feature levels, got {len(mlvl_feats)}."
             )
-        _ = img_metas  # kept for parity with detector head API
+        batch_size = mlvl_feats[0].shape[0]
+        validate_polarformer_img_metas(
+            img_metas,
+            batch_size=batch_size,
+            num_cams=self.cfg.num_cams if self.cfg.strict_img_meta else None,
+            strict_img_meta=self.cfg.strict_img_meta,
+            require_geometry=self.cfg.require_camera_geometry,
+        )
 
         mlvl_proj_feats = []
         mlvl_masks = []
@@ -84,20 +96,31 @@ class PolarFormerHeadLite(nn.Module):
 
         query_ids = torch.arange(self.num_query, device=mlvl_proj_feats[0].device)
         query_embeds = self.query_embedding(query_ids)
-        outs_dec, init_reference = self.transformer(
+        hs, init_reference, inter_references, _, _ = self.transformer(
             mlvl_proj_feats,
             mlvl_masks,
             query_embeds,
             mlvl_pos_embeds,
+            reg_branches=self.reg_branches if self.with_box_refine else None,
         )
-        outs_dec = torch.nan_to_num(outs_dec).permute(0, 2, 1, 3)  # [L, B, Q, C]
-        reference = inverse_sigmoid(init_reference)
+        hs = torch.nan_to_num(hs).permute(0, 2, 1, 3).contiguous()  # [L, B, Q, C]
+        init_reference = torch.nan_to_num(init_reference)
+        inter_references = torch.nan_to_num(inter_references)
+        if hs.shape[0] != len(self.cls_branches):
+            raise ValueError(
+                f"Decoder produced {hs.shape[0]} levels, but head has {len(self.cls_branches)} branches."
+            )
 
         outputs_classes = []
         outputs_coords = []
-        for lvl in range(outs_dec.shape[0]):
-            outputs_class = self.cls_branches[lvl](outs_dec[lvl])
-            tmp = self.reg_branches[lvl](outs_dec[lvl])
+        for lvl in range(hs.shape[0]):
+            reference = init_reference if lvl == 0 else inter_references[lvl - 1]
+            if reference.shape[-1] != 3:
+                raise ValueError(f"reference points must have last dim=3, got {reference.shape[-1]}")
+            reference = inverse_sigmoid(reference)
+
+            outputs_class = self.cls_branches[lvl](hs[lvl])
+            tmp = self.reg_branches[lvl](hs[lvl]).clone()
 
             tmp[..., 0:2] = (tmp[..., 0:2] + reference[..., 0:2]).sigmoid()
             tmp[..., 4:5] = (tmp[..., 4:5] + reference[..., 2:3]).sigmoid()

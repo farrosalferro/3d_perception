@@ -146,7 +146,7 @@ def _check_finite(capture: dict, outputs: dict) -> None:
 
 def _make_petr_notebook():
     nb = _new_notebook()
-    md = _read_markdown("petr")
+    md = _read_markdown("perception/petr")
     sections = _split_markdown_sections(md)
 
     # --- Preamble ---
@@ -155,8 +155,8 @@ def _make_petr_notebook():
         sys.path.insert(0, os.path.abspath("../.."))
 
         import torch
-        from pytorch_implementation.petr.config import debug_forward_config
-        from pytorch_implementation.petr.model import PETRLite
+        from pytorch_implementation.perception.petr.config import debug_forward_config
+        from pytorch_implementation.perception.petr.model import PETRLite
 
         cfg = debug_forward_config(num_queries=48, decoder_layers=2, depth_num=6)
         model = PETRLite(cfg).eval()
@@ -239,7 +239,7 @@ def _make_petr_notebook():
         if chunk_id == 0:
             nb.cells.append(code_cell("""\
                 # Chunk 0: End-to-end forward pass
-                # Source: pytorch_implementation/petr/model.py - PETRLite.forward
+                # Source: pytorch_implementation/perception/petr/model.py - PETRLite.forward
 
                 with torch.no_grad():
                     outputs = model(img, img_metas, decode=False)
@@ -258,8 +258,8 @@ def _make_petr_notebook():
         elif chunk_id == 1:
             nb.cells.append(code_cell("""\
                 # Chunk 1: Image features (backbone + neck)
-                # Source: pytorch_implementation/petr/model.py - PETRLite.extract_img_feat
-                # Source: pytorch_implementation/petr/backbone_neck.py - BackboneNeck
+                # Source: pytorch_implementation/perception/petr/model.py - PETRLite.extract_img_feat
+                # Source: pytorch_implementation/perception/petr/backbone_neck.py - BackboneNeck
 
                 capture, handles = {}, []
 
@@ -291,8 +291,8 @@ def _make_petr_notebook():
         elif chunk_id == 2:
             nb.cells.append(code_cell("""\
                 # Chunk 2: 3D position embedding from geometry
-                # Source: pytorch_implementation/petr/head.py - PETRHeadLite.position_embeding
-                # Source: pytorch_implementation/petr/utils.py - inverse_sigmoid, SinePositionalEncoding2D
+                # Source: pytorch_implementation/perception/petr/head.py - PETRHeadLite.position_embeding
+                # Source: pytorch_implementation/perception/petr/utils.py - inverse_sigmoid, SinePositionalEncoding2D
 
                 capture, handles = {}, []
                 _register_hook(model.head.input_proj, "head.input_proj", capture, handles)
@@ -327,10 +327,10 @@ def _make_petr_notebook():
         elif chunk_id == 3:
             nb.cells.append(code_cell("""\
                 # Chunk 3: Query construction from 3D reference points
-                # Source: pytorch_implementation/petr/head.py - reference_points, query_embedding
-                # Source: pytorch_implementation/petr/utils.py - pos2posemb3d
+                # Source: pytorch_implementation/perception/petr/head.py - reference_points, query_embedding
+                # Source: pytorch_implementation/perception/petr/utils.py - pos2posemb3d
 
-                from pytorch_implementation.petr.utils import pos2posemb3d
+                from pytorch_implementation.perception.petr.utils import pos2posemb3d
 
                 capture, handles = {}, []
                 _register_hook(model.head.reference_points, "head.reference_points", capture, handles)
@@ -358,7 +358,7 @@ def _make_petr_notebook():
         elif chunk_id == 4:
             nb.cells.append(code_cell("""\
                 # Chunk 4: Transformer decoder over multi-view memory
-                # Source: pytorch_implementation/petr/transformer.py
+                # Source: pytorch_implementation/perception/petr/transformer.py
                 #   PETRTransformerLite.forward, PETRTransformerDecoderLayerLite.forward
 
                 capture, handles = {}, []
@@ -391,8 +391,8 @@ def _make_petr_notebook():
         elif chunk_id == 5:
             nb.cells.append(code_cell("""\
                 # Chunk 5: Class/box heads and metric-space decoding
-                # Source: pytorch_implementation/petr/head.py - PETRHeadLite._build_branches, forward
-                # Source: pytorch_implementation/petr/postprocess.py - NMSFreeCoderLite
+                # Source: pytorch_implementation/perception/petr/head.py - PETRHeadLite._build_branches, forward
+                # Source: pytorch_implementation/perception/petr/postprocess.py - NMSFreeCoderLite
 
                 capture, handles = {}, []
                 for idx, branch in enumerate(model.head.cls_branches):
@@ -464,7 +464,7 @@ def _make_petr_notebook():
 
 def _make_bevformer_notebook():
     nb = _new_notebook()
-    md = _read_markdown("bevformer")
+    md = _read_markdown("perception/bevformer")
 
     # --- Preamble ---
     nb.cells.append(code_cell("""\
@@ -472,8 +472,8 @@ def _make_bevformer_notebook():
         sys.path.insert(0, os.path.abspath("../.."))
 
         import torch
-        from pytorch_implementation.bevformer.config import debug_forward_config
-        from pytorch_implementation.bevformer.model import BEVFormerLite
+        from pytorch_implementation.perception.bevformer.config import debug_forward_config
+        from pytorch_implementation.perception.bevformer.model import BEVFormerLite
 
         cfg = debug_forward_config("tiny", bev_hw=(12, 12), num_queries=48,
                                     encoder_layers=2, decoder_layers=2)
@@ -546,7 +546,7 @@ def _make_bevformer_notebook():
             if chunk_id == 0:
                 nb.cells.append(code_cell("""\
                     # Chunk 0: End-to-end forward pass
-                    # Source: pytorch_implementation/bevformer/model.py - BEVFormerLite.forward
+                    # Source: pytorch_implementation/perception/bevformer/model.py - BEVFormerLite.forward
 
                     with torch.no_grad():
                         outputs = model(img, img_metas, decode=False)
@@ -567,8 +567,8 @@ def _make_bevformer_notebook():
             elif chunk_id == 1:
                 nb.cells.append(code_cell("""\
                     # Chunk 1: Image features (backbone + neck)
-                    # Source: pytorch_implementation/bevformer/model.py - extract_img_feat
-                    # Source: pytorch_implementation/bevformer/backbone_neck.py
+                    # Source: pytorch_implementation/perception/bevformer/model.py - extract_img_feat
+                    # Source: pytorch_implementation/perception/bevformer/backbone_neck.py
 
                     capture, handles = {}, []
                     _register_hook(model.backbone_neck.backbone.stem, "backbone.stem", capture, handles)
@@ -599,8 +599,8 @@ def _make_bevformer_notebook():
             elif chunk_id == 2:
                 nb.cells.append(code_cell("""\
                     # Chunk 2: BEV query initialization
-                    # Source: pytorch_implementation/bevformer/head.py - BEVFormerHeadLite.forward
-                    # Source: pytorch_implementation/bevformer/utils/positional_encoding.py
+                    # Source: pytorch_implementation/perception/bevformer/head.py - BEVFormerHeadLite.forward
+                    # Source: pytorch_implementation/perception/bevformer/utils/positional_encoding.py
 
                     print("=== BEV query shapes ===")
                     print(f"  bev_embedding.weight: {tuple(model.head.bev_embedding.weight.shape)}")
@@ -620,10 +620,10 @@ def _make_bevformer_notebook():
             elif chunk_id == 3:
                 nb.cells.append(code_cell("""\
                     # Chunk 3: Geometry and projection bridge
-                    # Source: pytorch_implementation/bevformer/utils/geometry.py
+                    # Source: pytorch_implementation/perception/bevformer/utils/geometry.py
                     #   get_reference_points_3d, get_reference_points_2d, point_sampling
 
-                    from pytorch_implementation.bevformer.utils.geometry import (
+                    from pytorch_implementation.perception.bevformer.utils.geometry import (
                         get_reference_points_3d, get_reference_points_2d, point_sampling,
                     )
 
@@ -658,8 +658,8 @@ def _make_bevformer_notebook():
             elif chunk_id == 4:
                 nb.cells.append(code_cell("""\
                     # Chunk 4: Temporal self-attention (TSA)
-                    # Source: pytorch_implementation/bevformer/modules/temporal_self_attention.py
-                    # Source: pytorch_implementation/bevformer/modules/encoder.py
+                    # Source: pytorch_implementation/perception/bevformer/modules/temporal_self_attention.py
+                    # Source: pytorch_implementation/perception/bevformer/modules/encoder.py
 
                     capture, handles = {}, []
                     for idx in range(cfg.num_encoder_layers):
@@ -684,8 +684,8 @@ def _make_bevformer_notebook():
             elif chunk_id == 5:
                 nb.cells.append(code_cell("""\
                     # Chunk 5: Spatial cross-attention (SCA)
-                    # Source: pytorch_implementation/bevformer/modules/spatial_cross_attention.py
-                    # Source: pytorch_implementation/bevformer/modules/deformable_attention.py
+                    # Source: pytorch_implementation/perception/bevformer/modules/spatial_cross_attention.py
+                    # Source: pytorch_implementation/perception/bevformer/modules/deformable_attention.py
 
                     capture, handles = {}, []
                     for idx in range(cfg.num_encoder_layers):
@@ -706,7 +706,7 @@ def _make_bevformer_notebook():
             elif chunk_id == 6:
                 nb.cells.append(code_cell("""\
                     # Chunk 6: Encoder recurrence result
-                    # Source: pytorch_implementation/bevformer/modules/encoder.py
+                    # Source: pytorch_implementation/perception/bevformer/modules/encoder.py
 
                     capture, handles = {}, []
                     for idx in range(cfg.num_encoder_layers):
@@ -735,8 +735,8 @@ def _make_bevformer_notebook():
             elif chunk_id == 7:
                 nb.cells.append(code_cell("""\
                     # Chunk 7: Decoder and iterative reference refinement
-                    # Source: pytorch_implementation/bevformer/modules/decoder.py
-                    # Source: pytorch_implementation/bevformer/head.py
+                    # Source: pytorch_implementation/perception/bevformer/modules/decoder.py
+                    # Source: pytorch_implementation/perception/bevformer/head.py
 
                     capture, handles = {}, []
                     for idx in range(cfg.num_decoder_layers):
@@ -774,8 +774,8 @@ def _make_bevformer_notebook():
             elif chunk_id == 8:
                 nb.cells.append(code_cell("""\
                     # Chunk 8: Box parameterization and decode
-                    # Source: pytorch_implementation/bevformer/postprocess/nms_free_coder.py
-                    # Source: pytorch_implementation/bevformer/utils/boxes.py
+                    # Source: pytorch_implementation/perception/bevformer/postprocess/nms_free_coder.py
+                    # Source: pytorch_implementation/perception/bevformer/utils/boxes.py
 
                     with torch.no_grad():
                         decoded_outputs = model(img, img_metas, decode=True)
@@ -832,15 +832,15 @@ def _make_bevformer_notebook():
 
 def _make_maptr_notebook():
     nb = _new_notebook()
-    md = _read_markdown("maptr")
+    md = _read_markdown("perception/maptr")
 
     nb.cells.append(code_cell("""\
         import sys, os
         sys.path.insert(0, os.path.abspath("../.."))
 
         import torch
-        from pytorch_implementation.maptr.config import debug_forward_config
-        from pytorch_implementation.maptr.model import MapTRLite
+        from pytorch_implementation.perception.maptr.config import debug_forward_config
+        from pytorch_implementation.perception.maptr.model import MapTRLite
 
         cfg = debug_forward_config(num_vec=10, num_pts_per_vec=4, decoder_layers=2)
         model = MapTRLite(cfg).eval()
@@ -908,7 +908,7 @@ def _make_maptr_notebook():
             elif chunk_id == 1:
                 nb.cells.append(code_cell("""\
                     # Chunk 1: Hierarchical query embeddings
-                    # Source: pytorch_implementation/maptr/head.py
+                    # Source: pytorch_implementation/perception/maptr/head.py
 
                     print("=== Query embedding shapes ===")
                     print(f"  instance_embedding.weight: {tuple(model.head.instance_embedding.weight.shape)}")
@@ -931,7 +931,7 @@ def _make_maptr_notebook():
             elif chunk_id == 2:
                 nb.cells.append(code_cell("""\
                     # Chunk 2: BEV token construction
-                    # Source: pytorch_implementation/maptr/transformer.py - MapTRBEVEncoderLite
+                    # Source: pytorch_implementation/perception/maptr/transformer.py - MapTRBEVEncoderLite
 
                     capture, handles = {}, []
                     _register_hook(model.head.bev_embedding, "head.bev_embedding", capture, handles)
@@ -949,7 +949,7 @@ def _make_maptr_notebook():
             elif chunk_id == 3:
                 nb.cells.append(code_cell("""\
                     # Chunk 3: Decoder and vectorized predictions
-                    # Source: pytorch_implementation/maptr/transformer.py, head.py
+                    # Source: pytorch_implementation/perception/maptr/transformer.py, head.py
 
                     capture, handles = {}, []
                     for idx in range(cfg.num_decoder_layers):
@@ -1105,6 +1105,42 @@ def _make_simple_notebook(
     return nb
 
 
+def _append_markdown_sections_with_chunks(
+    nb: nbf.NotebookNode,
+    md: str,
+    chunk_code: dict[int, str],
+) -> None:
+    """Append grouped markdown sections and chunk-driven code cells."""
+    sections = _split_markdown_sections(md)
+    chunk_ids_seen = set()
+    i = 0
+    while i < len(sections):
+        heading, body = sections[i]
+        full_md = (heading + "\n" + body).strip() if heading else body.strip()
+        chunk_id = _chunk_id_from_heading(heading)
+
+        if heading.startswith("## "):
+            sub_parts = [full_md]
+            j = i + 1
+            while j < len(sections):
+                h2, b2 = sections[j]
+                if h2.startswith("## "):
+                    break
+                sub_parts.append((h2 + "\n" + b2).strip())
+                j += 1
+            nb.cells.append(md_cell("\n\n".join(sub_parts)))
+            i = j
+        else:
+            if full_md:
+                nb.cells.append(md_cell(full_md))
+            i += 1
+
+        if chunk_id is not None and chunk_id not in chunk_ids_seen:
+            chunk_ids_seen.add(chunk_id)
+            if chunk_id in chunk_code:
+                nb.cells.append(code_cell(chunk_code[chunk_id]))
+
+
 # ---------------------------------------------------------------------------
 # FB-BEV
 # ---------------------------------------------------------------------------
@@ -1129,7 +1165,7 @@ def _build_dummy_img_metas(batch_size):
 FBBEV_CHUNKS = {
     0: """\
         # Chunk 0: End-to-end forward
-        # Source: pytorch_implementation/fbbev/model.py - FBBEVLite.forward
+        # Source: pytorch_implementation/perception/fbbev/model.py - FBBEVLite.forward
 
         with torch.no_grad():
             outputs = model(img, img_metas, decode=False)
@@ -1144,8 +1180,8 @@ FBBEV_CHUNKS = {
     """,
     1: """\
         # Chunk 1: Camera projection and depth weighting
-        # Source: pytorch_implementation/fbbev/depth_net.py
-        # Source: pytorch_implementation/fbbev/forward_projection.py
+        # Source: pytorch_implementation/perception/fbbev/depth_net.py
+        # Source: pytorch_implementation/perception/fbbev/forward_projection.py
 
         capture, handles = {}, []
         _register_hook(model.depth_net.context_proj, "depth_net.context_proj", capture, handles)
@@ -1167,8 +1203,8 @@ FBBEV_CHUNKS = {
     """,
     2: """\
         # Chunk 2: Depth-aware backward projection
-        # Source: pytorch_implementation/fbbev/backward_projection.py
-        # Source: pytorch_implementation/fbbev/depth_aware_attention.py
+        # Source: pytorch_implementation/perception/fbbev/backward_projection.py
+        # Source: pytorch_implementation/perception/fbbev/depth_aware_attention.py
 
         capture, handles = {}, []
         _register_hook(model.backward_projection.depth_attention,
@@ -1188,7 +1224,7 @@ FBBEV_CHUNKS = {
     """,
     3: """\
         # Chunk 3: Temporal fusion with ego-motion alignment
-        # Source: pytorch_implementation/fbbev/temporal_fusion.py
+        # Source: pytorch_implementation/perception/fbbev/temporal_fusion.py
 
         capture, handles = {}, []
         _register_hook(model.temporal_fusion.time_conv, "temporal.time_conv", capture, handles)
@@ -1206,8 +1242,8 @@ FBBEV_CHUNKS = {
     """,
     4: """\
         # Chunk 4: Detection outputs and decoded 3D boxes
-        # Source: pytorch_implementation/fbbev/detection_head.py
-        # Source: pytorch_implementation/fbbev/postprocess.py
+        # Source: pytorch_implementation/perception/fbbev/detection_head.py
+        # Source: pytorch_implementation/perception/fbbev/postprocess.py
 
         capture, handles = {}, []
         _register_hook(model.detection_head.shared_conv, "head.shared", capture, handles)
@@ -1284,7 +1320,7 @@ POLAR_CHUNKS = {
     """,
     1: """\
         # Chunk 1: Camera features to polar rays
-        # Source: pytorch_implementation/polarformer/backbone_neck.py
+        # Source: pytorch_implementation/perception/polarformer/backbone_neck.py
 
         capture, handles = {}, []
         _register_hook(model.backbone_neck.backbone.stem, "backbone.stem", capture, handles)
@@ -1307,7 +1343,7 @@ POLAR_CHUNKS = {
     """,
     2: """\
         # Chunk 2: Multi-level polar memory + decoder
-        # Source: pytorch_implementation/polarformer/transformer.py
+        # Source: pytorch_implementation/perception/polarformer/transformer.py
 
         capture, handles = {}, []
         for idx in range(cfg.num_decoder_layers):
@@ -1331,7 +1367,7 @@ POLAR_CHUNKS = {
     """,
     3: """\
         # Chunk 3: Polar box parameters to Cartesian center
-        # Source: pytorch_implementation/polarformer/head.py, postprocess.py
+        # Source: pytorch_implementation/perception/polarformer/head.py, postprocess.py
 
         capture, handles = {}, []
         for idx in range(cfg.num_decoder_layers):
@@ -1390,7 +1426,7 @@ SPARSE4D_CHUNKS = {
     """,
     1: """\
         # Chunk 1: Image feature extraction
-        # Source: pytorch_implementation/sparse4d/backbone_neck.py, model.py
+        # Source: pytorch_implementation/perception/sparse4d/backbone_neck.py, model.py
 
         capture, handles = {}, []
         _register_hook(model.backbone_neck.backbone.stem, "backbone.stem", capture, handles)
@@ -1413,7 +1449,7 @@ SPARSE4D_CHUNKS = {
     """,
     2: """\
         # Chunk 2: Instance bank and anchor encoding
-        # Source: pytorch_implementation/sparse4d/instance_bank.py, blocks.py
+        # Source: pytorch_implementation/perception/sparse4d/instance_bank.py, blocks.py
 
         capture, handles = {}, []
         _register_hook(model.head.instance_bank, "head.instance_bank", capture, handles)
@@ -1430,7 +1466,7 @@ SPARSE4D_CHUNKS = {
     """,
     3: """\
         # Chunk 3: Decoder updates with image aggregation
-        # Source: pytorch_implementation/sparse4d/decoder.py, blocks.py
+        # Source: pytorch_implementation/perception/sparse4d/decoder.py, blocks.py
 
         capture, handles = {}, []
         for idx in range(cfg.num_decoder_layers):
@@ -1455,7 +1491,7 @@ SPARSE4D_CHUNKS = {
     """,
     4: """\
         # Chunk 4: Layer-wise class/box refinement and decode
-        # Source: pytorch_implementation/sparse4d/blocks.py, decoder.py
+        # Source: pytorch_implementation/perception/sparse4d/blocks.py, decoder.py
 
         capture, handles = {}, []
         for idx in range(cfg.num_decoder_layers):
@@ -1519,7 +1555,7 @@ def _build_dummy_img_metas(batch_size, num_cams, height, width):
 STREAMPETR_CHUNKS = {
     0: """\
         # Chunk 0: End-to-end StreamPETR contract
-        # Source: pytorch_implementation/streampetr/model.py
+        # Source: pytorch_implementation/perception/streampetr/model.py
 
         prev_exists = torch.zeros(batch_size, dtype=torch.float32)
         with torch.no_grad():
@@ -1543,7 +1579,7 @@ STREAMPETR_CHUNKS = {
     """,
     1: """\
         # Chunk 1: Multi-view feature extraction
-        # Source: pytorch_implementation/streampetr/backbone_neck.py
+        # Source: pytorch_implementation/perception/streampetr/backbone_neck.py
 
         capture, handles = {}, []
         _register_hook(model.backbone_neck.backbone.stem, "backbone.stem", capture, handles)
@@ -1564,8 +1600,8 @@ STREAMPETR_CHUNKS = {
     """,
     2: """\
         # Chunk 2: 3D geometry-aware positional encoding
-        # Source: pytorch_implementation/streampetr/head.py - position_embeding
-        # Source: pytorch_implementation/streampetr/utils.py
+        # Source: pytorch_implementation/perception/streampetr/head.py - position_embeding
+        # Source: pytorch_implementation/perception/streampetr/utils.py
 
         capture, handles = {}, []
         _register_hook(model.head.input_proj, "head.input_proj", capture, handles)
@@ -1585,7 +1621,7 @@ STREAMPETR_CHUNKS = {
     """,
     3: """\
         # Chunk 3: Temporal alignment with object-centric memory
-        # Source: pytorch_implementation/streampetr/head.py - temporal_alignment
+        # Source: pytorch_implementation/perception/streampetr/head.py - temporal_alignment
 
         capture, handles = {}, []
         _register_hook(model.head.reference_points, "head.reference_points", capture, handles)
@@ -1605,7 +1641,7 @@ STREAMPETR_CHUNKS = {
     """,
     4: """\
         # Chunk 4: Temporal transformer decoding
-        # Source: pytorch_implementation/streampetr/transformer.py
+        # Source: pytorch_implementation/perception/streampetr/transformer.py
 
         capture, handles = {}, []
         for idx in range(cfg.num_decoder_layers):
@@ -1631,7 +1667,7 @@ STREAMPETR_CHUNKS = {
     """,
     5: """\
         # Chunk 5: Prediction heads and memory update
-        # Source: pytorch_implementation/streampetr/head.py
+        # Source: pytorch_implementation/perception/streampetr/head.py
 
         capture, handles = {}, []
         for idx in range(cfg.num_decoder_layers):
@@ -1852,6 +1888,559 @@ def _make_prediction_surroundocc_notebook():
     return nb
 
 
+def _append_markdown_sections_with_chunks(
+    nb: nbf.NotebookNode,
+    md: str,
+    chunk_code: dict[int, str],
+) -> None:
+    sections = _split_markdown_sections(md)
+    chunk_ids_seen = set()
+    i = 0
+    while i < len(sections):
+        heading, body = sections[i]
+        full_md = (heading + "\n" + body).strip() if heading else body.strip()
+        chunk_id = _chunk_id_from_heading(heading)
+
+        if heading.startswith("## "):
+            sub_parts = [full_md]
+            j = i + 1
+            while j < len(sections):
+                h2, b2 = sections[j]
+                if h2.startswith("## "):
+                    break
+                sub_parts.append((h2 + "\n" + b2).strip())
+                j += 1
+            nb.cells.append(md_cell("\n\n".join(sub_parts)))
+            i = j
+        else:
+            if full_md:
+                nb.cells.append(md_cell(full_md))
+            i += 1
+
+        if chunk_id is not None and chunk_id not in chunk_ids_seen:
+            chunk_ids_seen.add(chunk_id)
+            if chunk_id in chunk_code:
+                nb.cells.append(code_cell(chunk_code[chunk_id]))
+
+
+def _make_prediction_beverse_notebook():
+    nb = _new_notebook()
+    md = _read_markdown("prediction/beverse")
+
+    nb.cells.append(code_cell("""\
+        import sys, os
+        sys.path.insert(0, os.path.abspath("../.."))
+
+        import torch
+        from pytorch_implementation.prediction.beverse.config import debug_forward_config
+        from pytorch_implementation.prediction.beverse.metrics import compute_ade_fde, select_best_mode_by_ade
+        from pytorch_implementation.prediction.beverse.model import BEVerseLite
+
+        cfg = debug_forward_config()
+        model = BEVerseLite(cfg).eval()
+
+        batch_size = 2
+        height, width = 96, 160
+        img = torch.randn(batch_size, cfg.num_cams, 3, height, width)
+        img_metas = [{"sample_idx": f"sample_{batch_idx}"} for batch_idx in range(batch_size)]
+
+        print(f"Model: {type(model).__name__}")
+        print(f"Config: {cfg.name}")
+        print(f"img: {tuple(img.shape)}")
+    """))
+    nb.cells.append(code_cell_raw(COMMON_HELPERS))
+
+    chunk_code = {
+        0: """\
+            # Chunk 0: End-to-end forward contract + decode
+            with torch.no_grad():
+                outputs = model(img, img_metas, decode=False)
+                decoded_out = model(img, img_metas, decode=True)
+
+            print("=== Output shapes ===")
+            for key, val in outputs.items():
+                if torch.is_tensor(val):
+                    print(f"  {key}: {tuple(val.shape)}")
+
+            decoded = decoded_out["decoded"]
+            print("\\n=== Decoded contract ===")
+            for key, val in decoded.items():
+                if torch.is_tensor(val):
+                    print(f"  {key}: {tuple(val.shape)}")
+        """,
+        1: """\
+            # Chunk 1: Multi-camera image encoding and BEV seed
+            capture, handles = {}, []
+            _register_hook(model.backbone_neck.backbone.stem, "backbone.stem", capture, handles)
+            for idx, stage in enumerate(model.backbone_neck.backbone.stages):
+                _register_hook(stage, f"backbone.stage{idx}", capture, handles)
+            _register_hook(model.backbone_neck.neck.output_convs[0], "fpn.output0", capture, handles)
+            _register_hook(model.bev_encoder[0], "bev_encoder.conv0", capture, handles)
+            _register_hook(model.bev_encoder[3], "bev_encoder.conv1", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(img, img_metas, decode=False)
+            for h in handles:
+                h.remove()
+
+            print("=== Backbone/BEV encoder shapes ===")
+            for key in sorted(capture.keys()):
+                _print_shape(key, capture[key])
+            _print_shape("camera_feat", outputs["camera_feat"])
+            _print_shape("bev_embed", outputs["bev_embed"])
+        """,
+        2: """\
+            # Chunk 2: Temporal horizon decoding
+            capture, handles = {}, []
+            _register_hook(model.temporal_predictor.time_embedding, "temporal.time_embedding", capture, handles)
+            _register_hook(model.temporal_predictor.gru, "temporal.gru", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(img, img_metas, decode=False)
+            for h in handles:
+                h.remove()
+
+            print("=== Temporal decoding ===")
+            _print_shape("temporal.time_embedding", capture["temporal.time_embedding"])
+            _print_shape("temporal.gru", capture["temporal.gru"])
+            _print_shape("temporal_tokens", outputs["temporal_tokens"])
+            print(f"time_stamps: {tuple(outputs['time_stamps'].shape)}")
+            print(f"time_stamps values: {outputs['time_stamps']}")
+        """,
+        3: """\
+            # Chunk 3: Multimodal trajectory and mode heads
+            capture, handles = {}, []
+            _register_hook(model.trajectory_head.shared[1], "head.shared_fc0", capture, handles)
+            _register_hook(model.trajectory_head.delta_head, "head.delta", capture, handles)
+            _register_hook(model.trajectory_head.mode_head, "head.mode", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(img, img_metas, decode=False)
+            for h in handles:
+                h.remove()
+
+            print("=== Trajectory head shapes ===")
+            _print_shape("head.shared_fc0", capture["head.shared_fc0"])
+            _print_shape("head.delta", capture["head.delta"])
+            _print_shape("head.mode", capture["head.mode"])
+            _print_shape("trajectory_deltas", outputs["trajectory_deltas"])
+            _print_shape("trajectory_preds", outputs["trajectory_preds"])
+            _print_shape("mode_logits", outputs["mode_logits"])
+            _print_shape("mode_probs", outputs["mode_probs"])
+
+            reconstructed = outputs["trajectory_deltas"].cumsum(dim=2)
+            assert torch.allclose(outputs["trajectory_preds"], reconstructed, atol=1e-5, rtol=1e-5)
+            print("cumsum consistency check passed.")
+        """,
+        4: """\
+            # Chunk 4: Prediction metrics and horizon integrity
+            with torch.no_grad():
+                outputs = model(img, img_metas, decode=False)
+
+            target = outputs["trajectory_preds"][:, 0] + 0.1
+            valid_mask = torch.ones((outputs["trajectory_preds"].shape[0], outputs["trajectory_preds"].shape[2]), dtype=target.dtype, device=target.device)
+            valid_mask[:, -1] = 0.0
+
+            best_mode_idx, best_traj, best_ade = select_best_mode_by_ade(
+                outputs["trajectory_preds"], target, valid_mask=valid_mask
+            )
+            ade, fde = compute_ade_fde(best_traj, target, valid_mask=valid_mask)
+
+            print("=== Metric smoke ===")
+            print(f"best_mode_idx shape: {tuple(best_mode_idx.shape)}")
+            print(f"best_traj shape: {tuple(best_traj.shape)}")
+            print(f"best_ade: {best_ade}")
+            print(f"ADE: {ade}")
+            print(f"FDE: {fde}")
+        """,
+    }
+    _append_markdown_sections_with_chunks(nb, md, chunk_code)
+
+    nb.cells.append(code_cell("""\
+        # Final finite check with major hooks
+        capture, handles = {}, []
+        _register_hook(model.backbone_neck.backbone.stem, "backbone.stem", capture, handles)
+        for idx, stage in enumerate(model.backbone_neck.backbone.stages):
+            _register_hook(stage, f"backbone.stage{idx}", capture, handles)
+        _register_hook(model.backbone_neck.neck.output_convs[0], "fpn.output0", capture, handles)
+        _register_hook(model.bev_encoder[0], "bev_encoder.conv0", capture, handles)
+        _register_hook(model.bev_encoder[3], "bev_encoder.conv1", capture, handles)
+        _register_hook(model.temporal_predictor.time_embedding, "temporal.time_embedding", capture, handles)
+        _register_hook(model.temporal_predictor.gru, "temporal.gru", capture, handles)
+        _register_hook(model.trajectory_head.shared[1], "head.shared_fc0", capture, handles)
+        _register_hook(model.trajectory_head.delta_head, "head.delta", capture, handles)
+        _register_hook(model.trajectory_head.mode_head, "head.mode", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(img, img_metas, decode=False)
+        for h in handles:
+            h.remove()
+
+        _check_finite(capture, outputs)
+    """))
+    return nb
+
+
+def _make_prediction_flashocc_notebook():
+    nb = _new_notebook()
+    md = _read_markdown("prediction/flashocc")
+
+    nb.cells.append(code_cell("""\
+        import sys, os
+        sys.path.insert(0, os.path.abspath("../.."))
+
+        import torch
+        from pytorch_implementation.prediction.flashocc.config import debug_forward_config
+        from pytorch_implementation.prediction.flashocc.metrics import (
+            average_displacement_error,
+            final_displacement_error,
+            trajectory_smoothness_l2,
+        )
+        from pytorch_implementation.prediction.flashocc.model import FlashOccLite
+
+        cfg = debug_forward_config(
+            num_history=4,
+            pred_horizon=8,
+            bev_h=48,
+            bev_w=64,
+            num_queries=12,
+            num_modes=3,
+            topk=6,
+        )
+        model = FlashOccLite(cfg).eval()
+
+        batch_size = 2
+        occ_seq = torch.randn(
+            batch_size,
+            cfg.num_history,
+            cfg.backbone.in_channels,
+            cfg.bev_h,
+            cfg.bev_w,
+        )
+
+        print(f"Model: {type(model).__name__}")
+        print(f"Config: {cfg.name}")
+        print(f"occ_seq: {tuple(occ_seq.shape)}")
+    """))
+    nb.cells.append(code_cell_raw(COMMON_HELPERS))
+
+    chunk_code = {
+        0: """\
+            # Chunk 0: End-to-end prediction contract
+            with torch.no_grad():
+                outputs = model(occ_seq, decode=False)
+                decoded_out = model(occ_seq, decode=True)
+
+            print("=== Output shapes ===")
+            for key, val in outputs.items():
+                if torch.is_tensor(val):
+                    print(f"  {key}: {tuple(val.shape)}")
+
+            decoded = decoded_out["decoded"]
+            print(f"\\nDecoded batch size: {len(decoded)}")
+            print("Decoded sample keys:", sorted(decoded[0].keys()))
+            for key, val in decoded[0].items():
+                if torch.is_tensor(val):
+                    print(f"  {key}: {tuple(val.shape)}")
+        """,
+        1: """\
+            # Chunk 1: Occupancy encoding and BEV lifting
+            capture, handles = {}, []
+            _register_hook(model.backbone.stem, "backbone.stem", capture, handles)
+            for idx, block in enumerate(model.backbone.blocks):
+                _register_hook(block, f"backbone.block{idx}", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(occ_seq, decode=False)
+            for h in handles:
+                h.remove()
+
+            print("=== Backbone shapes ===")
+            for key in sorted(capture.keys()):
+                _print_shape(key, capture[key])
+            _print_shape("bev_sequence", outputs["bev_sequence"])
+        """,
+        2: """\
+            # Chunk 2: Temporal fusion and time-axis integrity
+            capture, handles = {}, []
+            _register_hook(model.temporal_mixer.temporal_conv, "temporal.temporal_conv", capture, handles)
+            _register_hook(model.temporal_mixer.proj, "temporal.proj", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(occ_seq, decode=False)
+            for h in handles:
+                h.remove()
+
+            print("=== Temporal mixer ===")
+            _print_shape("temporal.temporal_conv", capture["temporal.temporal_conv"])
+            _print_shape("temporal.proj", capture["temporal.proj"])
+            _print_shape("temporal_tokens", outputs["temporal_tokens"])
+            print(f"time_stamps: {outputs['time_stamps']}")
+            assert torch.all(outputs["time_stamps"][1:] > outputs["time_stamps"][:-1])
+            print("time-axis monotonicity check passed.")
+        """,
+        3: """\
+            # Chunk 3: Query-conditioned multimodal trajectory head
+            capture, handles = {}, []
+            _register_hook(model.prediction_head.query_proj, "head.query_proj", capture, handles)
+            _register_hook(model.prediction_head.cross_attn, "head.cross_attn", capture, handles)
+            _register_hook(model.prediction_head.traj_head, "head.traj_head", capture, handles)
+            _register_hook(model.prediction_head.mode_head, "head.mode_head", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(occ_seq, decode=False)
+            for h in handles:
+                h.remove()
+
+            print("=== Prediction head shapes ===")
+            _print_shape("head.query_proj", capture["head.query_proj"])
+            _print_shape("head.cross_attn", capture["head.cross_attn"])
+            _print_shape("head.traj_head", capture["head.traj_head"])
+            _print_shape("head.mode_head", capture["head.mode_head"])
+            _print_shape("traj_positions", outputs["traj_positions"])
+            _print_shape("traj_velocity", outputs["traj_velocity"])
+
+            reconstructed = outputs["anchor_xy"].unsqueeze(2).unsqueeze(3) + torch.cumsum(outputs["traj_deltas"], dim=3)
+            assert torch.allclose(outputs["traj_positions"], reconstructed, atol=1e-6)
+            assert torch.allclose(outputs["traj_velocity"] * cfg.dt, outputs["traj_deltas"], atol=1e-6)
+            print("trajectory consistency checks passed.")
+        """,
+        4: """\
+            # Chunk 4: Decode and metric smoke checks
+            with torch.no_grad():
+                outputs = model(occ_seq, decode=False)
+                decoded = model(occ_seq, decode=True)["decoded"]
+
+            best_mode = outputs["mode_logits"].argmax(dim=-1)
+            gather_idx = best_mode.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(
+                -1, -1, 1, outputs["traj_positions"].shape[-2], outputs["traj_positions"].shape[-1]
+            )
+            pred_best = torch.gather(outputs["traj_positions"], dim=2, index=gather_idx).squeeze(2)
+            gt = pred_best + 0.05 * torch.randn_like(pred_best)
+
+            ade = average_displacement_error(pred_best, gt)
+            fde = final_displacement_error(pred_best, gt)
+            smooth = trajectory_smoothness_l2(pred_best)
+            print("metric smoke:", {"ade": float(ade), "fde": float(fde), "smoothness": float(smooth)})
+
+            print("\\n=== Decoded contract ===")
+            for sample_idx, sample in enumerate(decoded):
+                print(f"sample {sample_idx}:")
+                for key, val in sample.items():
+                    if torch.is_tensor(val):
+                        print(f"  {key}: {tuple(val.shape)}")
+        """,
+    }
+    _append_markdown_sections_with_chunks(nb, md, chunk_code)
+
+    nb.cells.append(code_cell("""\
+        # Final finite check with major hooks
+        capture, handles = {}, []
+        _register_hook(model.backbone.stem, "backbone.stem", capture, handles)
+        for idx, block in enumerate(model.backbone.blocks):
+            _register_hook(block, f"backbone.block{idx}", capture, handles)
+        _register_hook(model.temporal_mixer.temporal_conv, "temporal.temporal_conv", capture, handles)
+        _register_hook(model.temporal_mixer.proj, "temporal.proj", capture, handles)
+        _register_hook(model.prediction_head.query_proj, "head.query_proj", capture, handles)
+        _register_hook(model.prediction_head.cross_attn, "head.cross_attn", capture, handles)
+        _register_hook(model.prediction_head.traj_head, "head.traj_head", capture, handles)
+        _register_hook(model.prediction_head.mode_head, "head.mode_head", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(occ_seq, decode=False)
+        for h in handles:
+            h.remove()
+
+        _check_finite(capture, outputs)
+    """))
+    return nb
+
+
+def _make_prediction_vip3d_notebook():
+    nb = _new_notebook()
+    md = _read_markdown("prediction/vip3d")
+
+    nb.cells.append(code_cell("""\
+        import sys, os
+        sys.path.insert(0, os.path.abspath("../.."))
+
+        import torch
+        from pytorch_implementation.prediction.vip3d.config import debug_forward_config
+        from pytorch_implementation.prediction.vip3d.model import VIP3DLite, compute_ade_fde
+
+        cfg = debug_forward_config()
+        model = VIP3DLite(cfg).eval()
+
+        def _build_debug_batch(cfg):
+            torch.manual_seed(13)
+            batch_size = 2
+            num_agents = 5
+
+            base_xy = torch.randn(batch_size, num_agents, 2)
+            velocity = torch.randn(batch_size, num_agents, 2) * 0.2
+            history_time = torch.arange(cfg.history_steps, dtype=torch.float32).view(1, 1, cfg.history_steps, 1)
+            future_time = torch.arange(1, cfg.future_steps + 1, dtype=torch.float32).view(1, 1, cfg.future_steps, 1)
+
+            history_xy = base_xy.unsqueeze(2) + history_time * velocity.unsqueeze(2)
+            history_vel = velocity.unsqueeze(2).expand(-1, -1, cfg.history_steps, -1)
+            agent_history = torch.cat([history_xy, history_vel], dim=-1)
+
+            agent_valid = torch.ones(batch_size, num_agents, cfg.history_steps, dtype=torch.bool)
+            agent_valid[0, 0, -1] = False
+            agent_valid[1, 3, 0] = False
+
+            map_polylines = torch.randn(
+                batch_size,
+                cfg.map_tokens,
+                cfg.map_points_per_token,
+                cfg.map_input_dim,
+            )
+
+            last_observed = history_xy[:, :, -1]
+            gt_future = last_observed.unsqueeze(2) + future_time * velocity.unsqueeze(2)
+            gt_valid = torch.ones(batch_size, num_agents, cfg.future_steps, dtype=torch.bool)
+            gt_valid[0, 2, -2:] = False
+            return agent_history, map_polylines, agent_valid, gt_future, gt_valid
+
+        agent_history, map_polylines, agent_valid, gt_future, gt_valid = _build_debug_batch(cfg)
+
+        print(f"Model: {type(model).__name__}")
+        print(f"Config: {cfg.name}")
+        print(f"agent_history: {tuple(agent_history.shape)}")
+        print(f"map_polylines: {tuple(map_polylines.shape)}")
+        print(f"agent_valid: {tuple(agent_valid.shape)}")
+    """))
+    nb.cells.append(code_cell_raw(COMMON_HELPERS))
+
+    chunk_code = {
+        0: """\
+            # Chunk 0: End-to-end prediction contract
+            with torch.no_grad():
+                outputs = model(agent_history, map_polylines, agent_valid)
+
+            print("=== Output shapes ===")
+            for key, val in outputs.items():
+                if torch.is_tensor(val):
+                    print(f"  {key}: {tuple(val.shape)}")
+        """,
+        1: """\
+            # Chunk 1: Agent temporal encoding
+            capture, handles = {}, []
+            _register_hook(model.history_input_proj, "history.input_proj", capture, handles)
+            _register_hook(model.history_encoder.layers[0], "history.encoder.layer0", capture, handles)
+            _register_hook(model.history_norm, "history.norm", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(agent_history, map_polylines, agent_valid)
+            for h in handles:
+                h.remove()
+
+            print("=== Agent temporal encoding ===")
+            _print_shape("history.input_proj", capture["history.input_proj"])
+            _print_shape("history.encoder.layer0", capture["history.encoder.layer0"])
+            _print_shape("history.norm", capture["history.norm"])
+            _print_shape("history_tokens", outputs["history_tokens"])
+        """,
+        2: """\
+            # Chunk 2: Map tokenization
+            capture, handles = {}, []
+            _register_hook(model.map_point_mlp, "map.point_mlp", capture, handles)
+            _register_hook(model.map_token_proj, "map.token_proj", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(agent_history, map_polylines, agent_valid)
+            for h in handles:
+                h.remove()
+
+            print("=== Map tokenization ===")
+            _print_shape("map.point_mlp", capture["map.point_mlp"])
+            _print_shape("map.token_proj", capture["map.token_proj"])
+            _print_shape("map_tokens", outputs["map_tokens"])
+        """,
+        3: """\
+            # Chunk 3: Agent-map fusion
+            capture, handles = {}, []
+            _register_hook(model.agent_map_attention, "fusion.cross_attention", capture, handles)
+            _register_hook(model.fusion_norm, "fusion.norm", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(agent_history, map_polylines, agent_valid)
+            for h in handles:
+                h.remove()
+
+            print("=== Agent-map fusion ===")
+            _print_shape("fusion.cross_attention", capture["fusion.cross_attention"])
+            _print_shape("fusion.norm", capture["fusion.norm"])
+            _print_shape("fused_tokens", outputs["fused_tokens"])
+            _print_shape("attention_weights", outputs["attention_weights"])
+        """,
+        4: """\
+            # Chunk 4: Multimodal trajectory decoding
+            capture, handles = {}, []
+            _register_hook(model.decoder.trunk, "decoder.trunk", capture, handles)
+            _register_hook(model.decoder.mode_head, "decoder.mode_head", capture, handles)
+            _register_hook(model.decoder.delta_head, "decoder.delta_head", capture, handles)
+
+            with torch.no_grad():
+                outputs = model(agent_history, map_polylines, agent_valid)
+            for h in handles:
+                h.remove()
+
+            print("=== Decoder outputs ===")
+            _print_shape("decoder.trunk", capture["decoder.trunk"])
+            _print_shape("decoder.mode_head", capture["decoder.mode_head"])
+            _print_shape("decoder.delta_head", capture["decoder.delta_head"])
+            _print_shape("mode_probs", outputs["mode_probs"])
+            _print_shape("trajectories", outputs["trajectories"])
+            _print_shape("best_trajectory", outputs["best_trajectory"])
+
+            assert torch.allclose(outputs["mode_probs"].sum(dim=-1), torch.ones_like(outputs["mode_probs"].sum(dim=-1)), atol=1e-5)
+            batch_size, num_agents = outputs["best_mode"].shape
+            gather_idx = outputs["best_mode"].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(
+                batch_size, num_agents, 1, cfg.future_steps, 2
+            )
+            expected_best = outputs["trajectories"].gather(dim=2, index=gather_idx).squeeze(2)
+            assert torch.allclose(outputs["best_trajectory"], expected_best, atol=1e-5)
+            print("best-mode trajectory contract check passed.")
+        """,
+        5: """\
+            # Chunk 5: Prediction metrics (ADE/FDE smoke)
+            with torch.no_grad():
+                outputs = model(agent_history, map_polylines, agent_valid)
+            metrics = compute_ade_fde(
+                trajectories=outputs["trajectories"],
+                gt_future=gt_future,
+                gt_valid=gt_valid,
+            )
+            print("metric smoke:", {"ade": float(metrics["ade"]), "fde": float(metrics["fde"])})
+        """,
+    }
+    _append_markdown_sections_with_chunks(nb, md, chunk_code)
+
+    nb.cells.append(code_cell("""\
+        # Final finite check with major hooks
+        capture, handles = {}, []
+        _register_hook(model.history_input_proj, "history.input_proj", capture, handles)
+        _register_hook(model.history_encoder.layers[0], "history.encoder.layer0", capture, handles)
+        _register_hook(model.history_norm, "history.norm", capture, handles)
+        _register_hook(model.map_point_mlp, "map.point_mlp", capture, handles)
+        _register_hook(model.map_token_proj, "map.token_proj", capture, handles)
+        _register_hook(model.agent_map_attention, "fusion.cross_attention", capture, handles)
+        _register_hook(model.fusion_norm, "fusion.norm", capture, handles)
+        _register_hook(model.decoder.trunk, "decoder.trunk", capture, handles)
+        _register_hook(model.decoder.mode_head, "decoder.mode_head", capture, handles)
+        _register_hook(model.decoder.delta_head, "decoder.delta_head", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(agent_history, map_polylines, agent_valid)
+        for h in handles:
+            h.remove()
+
+        _check_finite(capture, outputs)
+    """))
+    return nb
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1861,67 +2450,85 @@ def main() -> None:
 
     # PETR
     nb = _make_petr_notebook()
-    path = _write_notebook("petr", nb)
+    path = _write_notebook("perception/petr", nb)
     generated.append(path)
-    print(f"[1/8] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[1/11] Generated: {path}  ({len(nb.cells)} cells)")
 
     # BEVFormer
     nb = _make_bevformer_notebook()
-    path = _write_notebook("bevformer", nb)
+    path = _write_notebook("perception/bevformer", nb)
     generated.append(path)
-    print(f"[2/8] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[2/11] Generated: {path}  ({len(nb.cells)} cells)")
 
     # MapTR
     nb = _make_maptr_notebook()
-    path = _write_notebook("maptr", nb)
+    path = _write_notebook("perception/maptr", nb)
     generated.append(path)
-    print(f"[3/8] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[3/11] Generated: {path}  ({len(nb.cells)} cells)")
 
     # FB-BEV
     nb = _make_simple_notebook(
-        model_key="fbbev", import_module="fbbev", model_class="FBBEVLite",
+        model_key="perception/fbbev", import_module="perception.fbbev", model_class="FBBEVLite",
         config_call="debug_forward_config(max_num=48, depth_bins=6, bev_h=20, bev_w=20, bev_z=3)",
         metas_fn=FBBEV_METAS, batch_size=2, chunk_code=FBBEV_CHUNKS,
     )
-    path = _write_notebook("fbbev", nb)
+    path = _write_notebook("perception/fbbev", nb)
     generated.append(path)
-    print(f"[4/8] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[4/11] Generated: {path}  ({len(nb.cells)} cells)")
 
     # PolarFormer
     nb = _make_simple_notebook(
-        model_key="polarformer", import_module="polarformer", model_class="PolarFormerLite",
+        model_key="perception/polarformer", import_module="perception.polarformer", model_class="PolarFormerLite",
         config_call="debug_forward_config(num_queries=48, decoder_layers=2, azimuth_bins=96, radius_bins=48)",
         metas_fn=POLAR_METAS, batch_size=1, chunk_code=POLAR_CHUNKS,
     )
-    path = _write_notebook("polarformer", nb)
+    path = _write_notebook("perception/polarformer", nb)
     generated.append(path)
-    print(f"[5/8] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[5/11] Generated: {path}  ({len(nb.cells)} cells)")
 
     # Sparse4D
     nb = _make_simple_notebook(
-        model_key="sparse4d", import_module="sparse4d", model_class="Sparse4DLite",
+        model_key="perception/sparse4d", import_module="perception.sparse4d", model_class="Sparse4DLite",
         config_call="debug_forward_config(num_queries=48, decoder_layers=2)",
         metas_fn=SPARSE4D_METAS, batch_size=1, chunk_code=SPARSE4D_CHUNKS,
     )
-    path = _write_notebook("sparse4d", nb)
+    path = _write_notebook("perception/sparse4d", nb)
     generated.append(path)
-    print(f"[6/8] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[6/11] Generated: {path}  ({len(nb.cells)} cells)")
 
     # StreamPETR
     nb = _make_simple_notebook(
-        model_key="streampetr", import_module="streampetr", model_class="StreamPETRLite",
+        model_key="perception/streampetr", import_module="perception.streampetr", model_class="StreamPETRLite",
         config_call="debug_forward_config(num_queries=48, decoder_layers=2, depth_num=6, memory_len=40, topk_proposals=12, num_propagated=8)",
         metas_fn=STREAMPETR_METAS, batch_size=1, chunk_code=STREAMPETR_CHUNKS,
     )
-    path = _write_notebook("streampetr", nb)
+    path = _write_notebook("perception/streampetr", nb)
     generated.append(path)
-    print(f"[7/8] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[7/11] Generated: {path}  ({len(nb.cells)} cells)")
 
     # prediction/surroundocc
     nb = _make_prediction_surroundocc_notebook()
     path = _write_notebook("prediction/surroundocc", nb)
     generated.append(path)
-    print(f"[8/8] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[8/11] Generated: {path}  ({len(nb.cells)} cells)")
+
+    # prediction/beverse
+    nb = _make_prediction_beverse_notebook()
+    path = _write_notebook("prediction/beverse", nb)
+    generated.append(path)
+    print(f"[9/11] Generated: {path}  ({len(nb.cells)} cells)")
+
+    # prediction/flashocc
+    nb = _make_prediction_flashocc_notebook()
+    path = _write_notebook("prediction/flashocc", nb)
+    generated.append(path)
+    print(f"[10/11] Generated: {path}  ({len(nb.cells)} cells)")
+
+    # prediction/vip3d
+    nb = _make_prediction_vip3d_notebook()
+    path = _write_notebook("prediction/vip3d", nb)
+    generated.append(path)
+    print(f"[11/11] Generated: {path}  ({len(nb.cells)} cells)")
 
     print(f"\nAll {len(generated)} notebooks generated in {NB_DIR}")
 

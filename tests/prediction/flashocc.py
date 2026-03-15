@@ -60,6 +60,17 @@ def _conv2d_out(size: int, kernel: int, stride: int, padding: int) -> int:
     return ((size + 2 * padding - kernel) // stride) + 1
 
 
+def _identity_history_to_key(
+    batch_size: int,
+    history_steps: int,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    eye = torch.eye(3, device=device, dtype=dtype)
+    return eye.view(1, 1, 3, 3).expand(batch_size, history_steps, -1, -1).clone()
+
+
 @pytest.fixture()
 def instrumented_debug_forward():
     cfg = debug_forward_config(
@@ -218,6 +229,101 @@ def test_prediction_horizon_and_trajectory_contracts(instrumented_debug_forward)
         assert bool((sample["query_indices"] >= 0).all() and (sample["query_indices"] < cfg.num_queries).all())
         if k > 1:
             assert bool((sample["scores"][:-1] >= sample["scores"][1:]).all())
+
+
+def test_decode_parity_semantics_for_trajectory_and_occupancy(instrumented_debug_forward):
+    cfg = instrumented_debug_forward["cfg"]
+    model = instrumented_debug_forward["model"]
+    occ_seq = instrumented_debug_forward["occ_seq"]
+    batch_size = instrumented_debug_forward["batch_size"]
+
+    with torch.no_grad():
+        decoded_out = model(occ_seq, decode=True)
+
+    assert set(decoded_out.keys()) == {"preds", "decoded", "decoded_occ"}
+    preds = decoded_out["preds"]
+    decoded = decoded_out["decoded"]
+    decoded_occ = decoded_out["decoded_occ"]
+    expected_time = (
+        torch.arange(1, cfg.pred_horizon + 1, device=preds["time_stamps"].device, dtype=preds["time_stamps"].dtype)
+        * cfg.dt
+    )
+    assert torch.allclose(preds["time_stamps"], expected_time, atol=1e-6, rtol=1e-6)
+    assert bool(torch.all(preds["time_stamps"][1:] > preds["time_stamps"][:-1]))
+    mode_probs = preds["mode_logits"].softmax(dim=-1)
+    expected_occ_labels = preds["occupancy_logits"].softmax(dim=-1).argmax(dim=-1)
+
+    assert len(decoded) == batch_size
+    assert len(decoded_occ) == batch_size
+    for batch_idx, sample in enumerate(decoded):
+        assert set(sample.keys()) == {"trajectories", "scores", "mode_indices", "query_indices"}
+        count = sample["scores"].shape[0]
+        assert sample["trajectories"].shape == (count, cfg.pred_horizon, 2)
+        assert sample["mode_indices"].shape == (count,)
+        assert sample["query_indices"].shape == (count,)
+        if count > 1:
+            assert bool((sample["scores"][:-1] >= sample["scores"][1:]).all())
+        if count == 0:
+            continue
+
+        mode_indices = sample["mode_indices"].to(dtype=torch.long)
+        query_indices = sample["query_indices"].to(dtype=torch.long)
+        assert bool(((mode_indices >= 0) & (mode_indices < cfg.num_modes)).all())
+        assert bool(((query_indices >= 0) & (query_indices < cfg.num_queries)).all())
+
+        selected_query_traj = preds["traj_positions"][batch_idx].index_select(0, query_indices)
+        expected_traj = selected_query_traj[
+            torch.arange(count, device=query_indices.device),
+            mode_indices,
+        ]
+        expected_scores = mode_probs[batch_idx, query_indices, mode_indices]
+        assert torch.allclose(sample["trajectories"], expected_traj, atol=1e-6, rtol=1e-6)
+        assert torch.allclose(sample["scores"], expected_scores, atol=1e-6, rtol=1e-6)
+
+        occ_labels = decoded_occ[batch_idx]
+        assert tuple(occ_labels.shape) == tuple(expected_occ_labels[batch_idx].shape)
+        occ_labels = occ_labels.to(device=expected_occ_labels.device, dtype=expected_occ_labels.dtype)
+        assert torch.equal(occ_labels, expected_occ_labels[batch_idx])
+
+
+def test_temporal_alignment_state_update_with_history_to_key(instrumented_debug_forward):
+    cfg = instrumented_debug_forward["cfg"]
+    model = instrumented_debug_forward["model"]
+    occ_seq = instrumented_debug_forward["occ_seq"]
+    batch_size = instrumented_debug_forward["batch_size"]
+
+    identity_history_to_key = _identity_history_to_key(
+        batch_size=batch_size,
+        history_steps=cfg.num_history,
+        device=occ_seq.device,
+        dtype=occ_seq.dtype,
+    )
+    shifted_history_to_key = identity_history_to_key.clone()
+    shifted_history_to_key[:, 1:, 0, 2] = 1.0
+
+    with torch.no_grad():
+        outputs_identity = model(
+            occ_seq,
+            decode=False,
+            history_to_key=identity_history_to_key,
+        )
+        outputs_shifted = model(
+            occ_seq,
+            decode=False,
+            history_to_key=shifted_history_to_key,
+        )
+
+    assert torch.allclose(
+        outputs_identity["bev_sequence_aligned"],
+        outputs_identity["bev_sequence"],
+        atol=1e-5,
+        rtol=1e-5,
+    )
+    alignment_delta = (
+        outputs_shifted["bev_sequence_aligned"][:, 1:] - outputs_shifted["bev_sequence"][:, 1:]
+    ).abs().sum()
+    assert float(alignment_delta) > 0.0
+    assert not torch.allclose(outputs_identity["bev_fused"], outputs_shifted["bev_fused"])
 
 
 def test_prediction_metric_smoke(instrumented_debug_forward):

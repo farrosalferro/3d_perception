@@ -13,11 +13,13 @@ from .postprocess import NMSFreeCoderLite
 from .transformer import StreamPETRTemporalTransformerLite
 from .utils import (
     SinePositionalEncoding2D,
+    build_img2lidars,
     inverse_sigmoid,
     memory_refresh,
     pos2posemb1d,
     pos2posemb3d,
     topk_gather,
+    validate_streampetr_img_metas,
 )
 
 
@@ -55,6 +57,9 @@ class StreamPETRHeadLite(nn.Module):
         )
 
         self.reference_points = nn.Embedding(self.num_query, 3)
+        self.pseudo_reference_points = (
+            nn.Embedding(self.num_propagated, 3) if self.num_propagated > 0 else None
+        )
         self.query_embedding = nn.Sequential(
             nn.Linear(self.embed_dims * 3 // 2, self.embed_dims),
             nn.ReLU(inplace=True),
@@ -68,12 +73,16 @@ class StreamPETRHeadLite(nn.Module):
         self.cls_branches, self.reg_branches = self._build_branches(cfg.num_decoder_layers)
 
         self.bbox_coder = NMSFreeCoderLite(
+            pc_range=cfg.pc_range,
             post_center_range=cfg.post_center_range,
             max_num=cfg.max_num,
             num_classes=cfg.num_classes,
             score_threshold=cfg.score_threshold,
         )
         nn.init.uniform_(self.reference_points.weight, 0.0, 1.0)
+        if self.pseudo_reference_points is not None:
+            nn.init.uniform_(self.pseudo_reference_points.weight, 0.0, 1.0)
+            self.pseudo_reference_points.weight.requires_grad = False
         self.reset_memory()
 
     def _build_branches(self, num_pred: int) -> tuple[nn.ModuleList, nn.ModuleList]:
@@ -103,6 +112,14 @@ class StreamPETRHeadLite(nn.Module):
         self.memory_reference_point: torch.Tensor | None = None
         self.memory_timestamp: torch.Tensor | None = None
 
+    @staticmethod
+    def _shape_hw(shape: object, *, field_name: str, batch_idx: int, cam_idx: int) -> tuple[int, int]:
+        if not isinstance(shape, (list, tuple)) or len(shape) < 2:
+            raise ValueError(
+                f"img_metas[{batch_idx}]['{field_name}'][{cam_idx}] must provide at least (H, W), got {shape!r}."
+            )
+        return int(shape[0]), int(shape[1])
+
     def _build_img_masks(
         self,
         img_metas: list[dict],
@@ -111,18 +128,20 @@ class StreamPETRHeadLite(nn.Module):
         num_cams: int,
         device: torch.device,
     ) -> torch.Tensor:
-        pad_shapes = img_metas[0].get("pad_shape", img_metas[0].get("img_shape"))
-        if pad_shapes is None:
-            raise KeyError("img_metas must provide 'pad_shape' or 'img_shape'.")
-        pad_h, pad_w = int(pad_shapes[0][0]), int(pad_shapes[0][1])
+        validate_streampetr_img_metas(img_metas, batch_size=batch_size, num_cams=num_cams)
+        pad_shapes = img_metas[0].get("pad_shape", img_metas[0]["img_shape"])
+        pad_h, pad_w = self._shape_hw(pad_shapes[0], field_name="pad_shape", batch_idx=0, cam_idx=0)
 
         masks = torch.ones((batch_size, num_cams, pad_h, pad_w), device=device, dtype=torch.bool)
         for batch_idx in range(batch_size):
-            img_shapes = img_metas[batch_idx].get("img_shape")
-            if img_shapes is None:
-                raise KeyError("img_metas entries must provide 'img_shape'.")
+            img_shapes = img_metas[batch_idx]["img_shape"]
             for cam_idx in range(num_cams):
-                img_h, img_w = int(img_shapes[cam_idx][0]), int(img_shapes[cam_idx][1])
+                img_h, img_w = self._shape_hw(
+                    img_shapes[cam_idx],
+                    field_name="img_shape",
+                    batch_idx=batch_idx,
+                    cam_idx=cam_idx,
+                )
                 masks[batch_idx, cam_idx, :img_h, :img_w] = False
         return masks
 
@@ -134,20 +153,28 @@ class StreamPETRHeadLite(nn.Module):
         dtype: torch.dtype,
         prev_exists: torch.Tensor | None,
     ) -> None:
-        if self.memory_embedding is None:
-            self.memory_embedding = torch.zeros(batch_size, self.memory_len, self.embed_dims, device=device, dtype=dtype)
-            self.memory_reference_point = torch.zeros(batch_size, self.memory_len, 3, device=device, dtype=dtype)
-            self.memory_timestamp = torch.zeros(batch_size, self.memory_len, 1, device=device, dtype=dtype)
-
         if prev_exists is None:
-            prev_exists = torch.ones(batch_size, device=device, dtype=dtype)
+            prev_exists = torch.zeros(batch_size, device=device, dtype=dtype)
         else:
             prev_exists = prev_exists.to(device=device, dtype=dtype).view(batch_size)
 
-        self.memory_embedding = memory_refresh(self.memory_embedding, prev_exists)
-        self.memory_reference_point = memory_refresh(self.memory_reference_point, prev_exists)
-        self.memory_timestamp = memory_refresh(self.memory_timestamp, prev_exists)
+        if self.memory_embedding is None or self.memory_embedding.shape[0] != batch_size:
+            self.memory_embedding = torch.zeros(batch_size, self.memory_len, self.embed_dims, device=device, dtype=dtype)
+            self.memory_reference_point = torch.zeros(batch_size, self.memory_len, 3, device=device, dtype=dtype)
+            self.memory_timestamp = torch.zeros(batch_size, self.memory_len, 1, device=device, dtype=dtype)
+        self.memory_embedding = memory_refresh(self.memory_embedding[:, : self.memory_len], prev_exists)
+        self.memory_reference_point = memory_refresh(self.memory_reference_point[:, : self.memory_len], prev_exists)
+        self.memory_timestamp = memory_refresh(self.memory_timestamp[:, : self.memory_len], prev_exists)
         self.memory_timestamp = self.memory_timestamp + prev_exists.view(batch_size, 1, 1)
+
+        if self.pseudo_reference_points is not None:
+            num_seed = min(self.num_propagated, self.memory_reference_point.shape[1])
+            if num_seed > 0:
+                pseudo_ref = self.pseudo_reference_points.weight[:num_seed].to(device=device, dtype=dtype)
+                new_scene_mask = (1.0 - prev_exists).view(batch_size, 1, 1)
+                self.memory_reference_point[:, :num_seed] = (
+                    self.memory_reference_point[:, :num_seed] + new_scene_mask * pseudo_ref.unsqueeze(0)
+                )
 
     def post_update_memory(
         self,
@@ -160,21 +187,15 @@ class StreamPETRHeadLite(nn.Module):
 
         rec_memory = outs_dec_main[-1]  # [B, Q, C]
         rec_reference_points = all_bbox_preds[-1][..., :3]  # [B, Q, 3] in metric space
-        rec_score = all_cls_scores[-1].sigmoid().topk(1, dim=-1).values[..., 0]  # [B, Q]
+        rec_score = all_cls_scores[-1].sigmoid().topk(1, dim=-1).values  # [B, Q, 1]
         k = min(self.topk_proposals, rec_score.shape[1], self.memory_len)
         if k <= 0:
             return
-        _, topk_indexes = torch.topk(rec_score, k, dim=1)
+        _, topk_indexes = torch.topk(rec_score[..., 0], k, dim=1)
 
         rec_memory = topk_gather(rec_memory, topk_indexes).detach()
         rec_reference_points = topk_gather(rec_reference_points, topk_indexes).detach()
-        rec_timestamp = torch.zeros(
-            rec_memory.shape[0],
-            rec_memory.shape[1],
-            1,
-            dtype=rec_memory.dtype,
-            device=rec_memory.device,
-        )
+        rec_timestamp = topk_gather(torch.zeros_like(rec_score), topk_indexes)
 
         pc_min = rec_reference_points.new_tensor(self.cfg.pc_range[:3]).view(1, 1, 3)
         pc_max = rec_reference_points.new_tensor(self.cfg.pc_range[3:6]).view(1, 1, 3)
@@ -195,8 +216,8 @@ class StreamPETRHeadLite(nn.Module):
 
         eps = 1e-5
         batch_size, num_cams, _, height, width = feat.shape
-        pad_shapes = img_metas[0].get("pad_shape", img_metas[0].get("img_shape"))
-        pad_h, pad_w = int(pad_shapes[0][0]), int(pad_shapes[0][1])
+        pad_shapes = img_metas[0].get("pad_shape", img_metas[0]["img_shape"])
+        pad_h, pad_w = self._shape_hw(pad_shapes[0], field_name="pad_shape", batch_idx=0, cam_idx=0)
 
         coords_h = torch.arange(height, device=feat.device, dtype=feat.dtype) * float(pad_h) / float(height)
         coords_w = torch.arange(width, device=feat.device, dtype=feat.dtype) * float(pad_w) / float(width)
@@ -221,18 +242,12 @@ class StreamPETRHeadLite(nn.Module):
             torch.ones_like(coords[..., 2:3]) * eps,
         )
 
-        img2lidars = []
-        for meta in img_metas:
-            lidar2img = meta.get("lidar2img")
-            if lidar2img is None:
-                raise KeyError("img_metas entries must provide 'lidar2img'.")
-            mats = [torch.as_tensor(mat, device=feat.device, dtype=feat.dtype) for mat in lidar2img]
-            stacked = torch.stack(mats, dim=0)
-            img2lidars.append(torch.linalg.inv(stacked))
-        img2lidars = torch.stack(img2lidars, dim=0)  # [B, Ncam, 4, 4]
+        img2lidars = build_img2lidars(img_metas, device=feat.device, dtype=feat.dtype, num_cams=num_cams)
 
         coords = coords.view(1, 1, width, height, self.depth_num, 4, 1).repeat(batch_size, num_cams, 1, 1, 1, 1, 1)
-        img2lidars = img2lidars.view(batch_size, num_cams, 1, 1, 1, 4, 4)
+        img2lidars = img2lidars.view(batch_size, num_cams, 1, 1, 1, 4, 4).repeat(
+            1, 1, width, height, self.depth_num, 1, 1
+        )
         coords3d = torch.matmul(img2lidars, coords).squeeze(-1)[..., :3]  # [B, Ncam, W, H, D, 3]
         coords3d[..., 0:1] = (coords3d[..., 0:1] - self.position_range[0]) / (
             self.position_range[3] - self.position_range[0]
@@ -263,43 +278,48 @@ class StreamPETRHeadLite(nn.Module):
         if self.memory_embedding is None or self.memory_reference_point is None or self.memory_timestamp is None:
             return tgt, query_pos, reference_points, None, None
 
-        num_propagated = min(self.num_propagated, self.memory_embedding.shape[1])
-        propagated_memory = self.memory_embedding[:, :num_propagated]
-        propagated_ref = self.memory_reference_point[:, :num_propagated]
-        if num_propagated > 0:
-            propagated_pos = self.query_embedding(
-                pos2posemb3d(propagated_ref, num_pos_feats=self.embed_dims // 2)
-            )
-            propagated_time = self.time_embedding(
-                pos2posemb1d(
-                    self.memory_timestamp[:, :num_propagated, 0],
-                    num_pos_feats=self.embed_dims // 2,
-                )
-            )
-            propagated_pos = propagated_pos + propagated_time
+        query_time = self.time_embedding(
+            pos2posemb1d(torch.zeros_like(reference_points[..., 0]), num_pos_feats=self.embed_dims // 2)
+        )
+        query_pos = query_pos + query_time
 
-            tgt = torch.cat([tgt, propagated_memory], dim=1)
-            query_pos = torch.cat([query_pos, propagated_pos], dim=1)
-            reference_points = torch.cat([reference_points, propagated_ref], dim=1)
-
-        temporal_memory = self.memory_embedding[:, num_propagated:]
-        temporal_ref = self.memory_reference_point[:, num_propagated:]
-        temporal_time = self.memory_timestamp[:, num_propagated:, 0]
-        if temporal_memory.numel() == 0:
-            return tgt, query_pos, reference_points, None, None
-
+        temporal_memory = self.memory_embedding
+        temporal_ref = self.memory_reference_point
+        temporal_time = self.memory_timestamp[..., 0].float()
         temporal_pos = self.query_embedding(pos2posemb3d(temporal_ref, num_pos_feats=self.embed_dims // 2))
         temporal_pos = temporal_pos + self.time_embedding(
             pos2posemb1d(temporal_time, num_pos_feats=self.embed_dims // 2)
         )
+
+        num_propagated = min(self.num_propagated, temporal_memory.shape[1])
+        if num_propagated > 0:
+            tgt = torch.cat([tgt, temporal_memory[:, :num_propagated]], dim=1)
+            query_pos = torch.cat([query_pos, temporal_pos[:, :num_propagated]], dim=1)
+            reference_points = torch.cat([reference_points, temporal_ref[:, :num_propagated]], dim=1)
+            temporal_memory = temporal_memory[:, num_propagated:]
+            temporal_pos = temporal_pos[:, num_propagated:]
+
+        if temporal_memory.numel() == 0:
+            return tgt, query_pos, reference_points, None, None
         return tgt, query_pos, reference_points, temporal_memory, temporal_pos
 
     def forward(self, mlvl_feats: list[torch.Tensor], img_metas: list[dict], **data) -> dict[str, torch.Tensor]:
+        if not mlvl_feats:
+            raise ValueError("mlvl_feats must contain at least one feature level.")
         x = mlvl_feats[self.position_level]
+        if x.dim() != 5:
+            raise ValueError(
+                f"StreamPETRHeadLite expects mlvl_feats[{self.position_level}] shaped [B, Ncam, C, H, W], got {tuple(x.shape)}."
+            )
         batch_size, num_cams = x.shape[:2]
+        validate_streampetr_img_metas(img_metas, batch_size=batch_size, num_cams=num_cams)
         prev_exists = data.get("prev_exists")
         if prev_exists is not None and not torch.is_tensor(prev_exists):
             prev_exists = torch.as_tensor(prev_exists, dtype=x.dtype, device=x.device)
+        if prev_exists is not None and prev_exists.numel() != batch_size:
+            raise ValueError(
+                f"prev_exists must have {batch_size} elements, got shape {tuple(prev_exists.shape)}."
+            )
         self.pre_update_memory(
             batch_size=batch_size,
             device=x.device,
@@ -340,6 +360,8 @@ class StreamPETRHeadLite(nn.Module):
         outs_dec = outs_dec.permute(0, 2, 1, 3)  # [L, B, Q_total, C]
         outs_dec_main = outs_dec[:, :, : self.num_query, :]
         reference = inverse_sigmoid(reference_points[:, : self.num_query, :].clone())
+        if reference.shape[-1] != 3:
+            raise AssertionError(f"Expected 3D reference points, got {reference.shape[-1]}.")
 
         outputs_classes = []
         outputs_coords = []
@@ -365,5 +387,13 @@ class StreamPETRHeadLite(nn.Module):
         }
 
     def get_bboxes(self, preds_dicts: dict[str, torch.Tensor]) -> list[dict[str, torch.Tensor]]:
-        return self.bbox_coder.decode(preds_dicts)
+        decoded = self.bbox_coder.decode(preds_dicts)
+        for pred in decoded:
+            bboxes = pred["bboxes"]
+            if bboxes.numel() == 0 or bboxes.shape[-1] < 6:
+                continue
+            adjusted = bboxes.clone()
+            adjusted[:, 2] = adjusted[:, 2] - adjusted[:, 5] * 0.5
+            pred["bboxes"] = adjusted
+        return decoded
 

@@ -29,7 +29,36 @@ class BEVerseForwardConfig:
     num_modes: int = 6
     future_dt: float = 0.5
     max_delta: float = 2.0
+    temporal_receptive_field: int = 3
+    strict_meta_validation: bool = True
+    decode_topk: int = 3
+    task_enable_map: bool = False
+    task_enable_3dod: bool = False
+    task_enable_motion: bool = True
+    task_weight_map: float = 1.0
+    task_weight_3dod: float = 1.0
+    task_weight_motion: float = 1.0
     backbone_neck: BackboneNeckConfig = BackboneNeckConfig()
+
+    def __post_init__(self) -> None:
+        if self.num_cams <= 0:
+            raise ValueError("num_cams must be positive.")
+        if self.embed_dims <= 0:
+            raise ValueError("embed_dims must be positive.")
+        if self.bev_h <= 0 or self.bev_w <= 0:
+            raise ValueError("bev_h and bev_w must be positive.")
+        if self.pred_horizon <= 0:
+            raise ValueError("pred_horizon must be positive.")
+        if self.num_modes <= 0:
+            raise ValueError("num_modes must be positive.")
+        if self.future_dt <= 0:
+            raise ValueError("future_dt must be positive.")
+        if self.max_delta <= 0:
+            raise ValueError("max_delta must be positive.")
+        if self.temporal_receptive_field <= 0:
+            raise ValueError("temporal_receptive_field must be positive.")
+        if self.decode_topk <= 0:
+            raise ValueError("decode_topk must be positive.")
 
 
 def beverse_base_forward_config() -> BEVerseForwardConfig:

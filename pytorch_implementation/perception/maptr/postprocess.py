@@ -12,7 +12,7 @@ from .utils import denormalize_boxes_cxcywh, denormalize_points
 
 @dataclass
 class MapTRNMSFreeCoderLite:
-    """Minimal MapTR-style top-k decode over vector/class logits."""
+    """MapTR-style top-k decode over vector/class logits."""
 
     post_center_range: Sequence[float] | None
     pc_range: Sequence[float]
@@ -38,14 +38,34 @@ class MapTRNMSFreeCoderLite:
         pts_metric = denormalize_points(pts, self.pc_range)
 
         keep = torch.ones_like(scores, dtype=torch.bool)
+        thresh_mask: torch.Tensor | None = None
         if self.score_threshold is not None:
-            keep = keep & (scores > self.score_threshold)
+            thresh_mask = scores > self.score_threshold
+            tmp_score = float(self.score_threshold)
+            while int(thresh_mask.sum().item()) == 0:
+                tmp_score *= 0.9
+                if tmp_score < 0.01:
+                    thresh_mask = scores > -1.0
+                    break
+                thresh_mask = scores >= tmp_score
+            keep &= thresh_mask
 
-        if self.post_center_range is not None:
-            post = torch.as_tensor(self.post_center_range, dtype=bboxes_metric.dtype, device=bboxes_metric.device)
+        if self.post_center_range is None:
+            raise NotImplementedError("post_center_range must be provided for MapTR decode.")
+
+        post = torch.as_tensor(self.post_center_range, dtype=bboxes_metric.dtype, device=bboxes_metric.device)
+        if post.numel() == 8:
+            keep &= (bboxes_metric[..., :4] >= post[:4]).all(dim=1)
+            keep &= (bboxes_metric[..., :4] <= post[4:]).all(dim=1)
+        elif post.numel() == 4:
             center_x = 0.5 * (bboxes_metric[:, 0] + bboxes_metric[:, 2])
             center_y = 0.5 * (bboxes_metric[:, 1] + bboxes_metric[:, 3])
-            keep = keep & (center_x >= post[0]) & (center_y >= post[1]) & (center_x <= post[2]) & (center_y <= post[3])
+            keep &= (center_x >= post[0]) & (center_y >= post[1]) & (center_x <= post[2]) & (center_y <= post[3])
+        else:
+            raise ValueError(
+                "post_center_range must have 4 (center filter) or 8 (xyxy filter) values, "
+                f"got {post.numel()}"
+            )
 
         return {
             "bboxes": bboxes_metric[keep],

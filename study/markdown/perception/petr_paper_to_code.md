@@ -4,8 +4,8 @@ This note maps PETR paper symbols/equations to the pure-PyTorch forward implemen
 
 Primary references:
 - Paper: `papers/PETR.pdf`
-- Implementation: `pytorch_implementation/petr/`
-- Intermediate tensor tests: `tests/petr/test_intermediate_tensors.py`
+- Implementation: `pytorch_implementation/perception/petr/`
+- Intermediate tensor tests: `tests/perception/petr.py`
 
 ## 1) Canonical study setup (fixed debug run)
 
@@ -31,7 +31,7 @@ Expected model outputs:
 - `all_cls_scores`: `[L, B, Q, num_classes] = [2, 1, 48, 10]`
 - `all_bbox_preds`: `[L, B, Q, code_size] = [2, 1, 48, 10]`
 
-These are verified in `tests/petr/test_intermediate_tensors.py`.
+These are verified in `tests/perception/petr.py`.
 
 ## 2) Symbol dictionary (paper -> code tensors)
 
@@ -78,16 +78,16 @@ $$
 - `\hat{Y}`: class and box predictions across decoder layers
 
 ### Code mapping
-- `PETRLite.forward` in `pytorch_implementation/petr/model.py`
-- `PETRLite.extract_img_feat` in `pytorch_implementation/petr/model.py`
-- `PETRHeadLite.forward` in `pytorch_implementation/petr/head.py`
+- `PETRLite.forward` in `pytorch_implementation/perception/petr/model.py`
+- `PETRLite.extract_img_feat` in `pytorch_implementation/perception/petr/model.py`
+- `PETRHeadLite.forward` in `pytorch_implementation/perception/petr/head.py`
 
 ### Tensor shape notes
 - Input image: `[B, Ncam, 3, H, W]`
 - Head outputs: `all_cls_scores [L, B, Q, Ccls]`, `all_bbox_preds [L, B, Q, Cbox]`
 
 ### One sanity check
-`tests/petr/test_intermediate_tensors.py` asserts final output shapes for the debug config.
+`tests/perception/petr.py` asserts final output shapes for the debug config.
 
 ---
 
@@ -122,15 +122,15 @@ $$
 - `C`: neck output channels
 
 ### Code mapping
-- `BackboneNeck` in `pytorch_implementation/petr/backbone_neck.py`
-- `extract_img_feat` in `pytorch_implementation/petr/model.py`
+- `BackboneNeck` in `pytorch_implementation/perception/petr/backbone_neck.py`
+- `extract_img_feat` in `pytorch_implementation/perception/petr/model.py`
 
 ### Tensor shape notes
 - Debug run yields `fpn.output0` shape `[6, 256, 6, 10]`
 - After reshape: `[1, 6, 256, 6, 10]`
 
 ### One sanity check
-`tests/petr/test_intermediate_tensors.py` validates backbone stage and `fpn.output0` shapes.
+`tests/perception/petr.py` validates backbone stage and `fpn.output0` shapes.
 
 ---
 
@@ -168,9 +168,9 @@ $$
 - `p_min, p_max`: `position_range` bounds
 
 ### Code mapping
-- `PETRHeadLite.position_embeding` in `pytorch_implementation/petr/head.py`
-- `inverse_sigmoid` in `pytorch_implementation/petr/utils.py`
-- `position_encoder` in `pytorch_implementation/petr/head.py`
+- `PETRHeadLite.position_embeding` in `pytorch_implementation/perception/petr/head.py`
+- `inverse_sigmoid` in `pytorch_implementation/perception/petr/utils.py`
+- `position_encoder` in `pytorch_implementation/perception/petr/head.py`
 
 ### Tensor shape notes
 - Pre-conv geometry tensor: `[B*Ncam, 3*D, H_f, W_f]`
@@ -209,8 +209,8 @@ $$
 - `e_q`: decoder query positional embedding
 
 ### Code mapping
-- `reference_points` and `query_embedding` in `pytorch_implementation/petr/head.py`
-- `pos2posemb3d` in `pytorch_implementation/petr/utils.py`
+- `reference_points` and `query_embedding` in `pytorch_implementation/perception/petr/head.py`
+- `pos2posemb3d` in `pytorch_implementation/perception/petr/utils.py`
 
 ### Tensor shape notes
 - `reference_points.weight`: `[Q, 3]`
@@ -248,8 +248,8 @@ $$
 - `L`: number of decoder layers
 
 ### Code mapping
-- `PETRTransformerLite.forward` in `pytorch_implementation/petr/transformer.py`
-- `PETRTransformerDecoderLayerLite` in `pytorch_implementation/petr/transformer.py`
+- `PETRTransformerLite.forward` in `pytorch_implementation/perception/petr/transformer.py`
+- `PETRTransformerDecoderLayerLite` in `pytorch_implementation/perception/petr/transformer.py`
 
 ### Tensor shape notes
 - Decoder hidden per layer: `[Q, B, C]`
@@ -298,7 +298,7 @@ and similarly for `y, z`.
 ### Code mapping
 - Layer branches in `PETRHeadLite._build_branches`
 - Forward update equations in `PETRHeadLite.forward`
-- Top-k decode in `NMSFreeCoderLite` (`pytorch_implementation/petr/postprocess.py`)
+- Top-k decode in `NMSFreeCoderLite` (`pytorch_implementation/perception/petr/postprocess.py`)
 
 ### Tensor shape notes
 - `all_cls_scores`: `[L, B, Q, num_classes]`
@@ -379,12 +379,9 @@ flowchart LR
 7. Re-run the end-to-end trace in Section 4 while stepping through code.
 8. Answer study drills without looking at code, then verify.
 
-## 7) Known implementation simplifications in this repo
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- Uses standard `nn.MultiheadAttention` instead of deformable attention.
-- Single FPN level only (no multi-scale features).
-- No data augmentation transforms in the geometry pipeline.
-- `lidar_discretization` depth binning is configurable but defaults to uniform spacing.
-
-These simplifications keep the PETR concept flow explicit for study.
-
+- Behavioral parity is pinned to frozen PETR anchor files in `study/markdown/strict_parity_anchor_manifest.md`.
+- Geometry-aware 3D positional encoding uses validated `lidar2img -> img2lidar` transforms with strict metadata checks.
+- Decoder keeps PETR reference-point regression semantics per layer, and decode uses denormalized box semantics aligned with NMS-free coder behavior.
+- Framework/CUDA dependencies are replaced with pure PyTorch module composition and tensor ops only.

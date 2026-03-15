@@ -18,6 +18,38 @@ class FlashOccBackboneConfig:
 
 
 @dataclass(frozen=True)
+class FlashOccDepthViewConfig:
+    """Depth-aware BEV lifting settings inspired by LSS/BEVDepth."""
+
+    depth_bins: int = 8
+    depth_min: float = 1.0
+    depth_max: float = 45.0
+    context_channels: int = 96
+    collapse_z: bool = True
+
+
+@dataclass(frozen=True)
+class FlashOccTemporalWarpConfig:
+    """Temporal BEV warp/alignment settings aligned with BEVDet4D semantics."""
+
+    enabled: bool = True
+    align_after_view_transformation: bool = True
+    x_bounds: tuple[float, float] = (-51.2, 51.2)
+    y_bounds: tuple[float, float] = (-51.2, 51.2)
+
+
+@dataclass(frozen=True)
+class FlashOccOccupancyHeadConfig:
+    """Occupancy logits head settings mirroring BEVOCCHead2D contracts."""
+
+    dz: int = 8
+    num_classes: int = 18
+    use_predicter: bool = True
+    out_dim: int = 96
+    decode_use_gpu: bool = True
+
+
+@dataclass(frozen=True)
 class FlashOccConfig:
     """Forward-only FlashOcc-style trajectory prediction configuration."""
 
@@ -32,6 +64,9 @@ class FlashOccConfig:
     num_heads: int = 4
     topk: int = 8
     backbone: FlashOccBackboneConfig = FlashOccBackboneConfig()
+    depth_view: FlashOccDepthViewConfig = FlashOccDepthViewConfig()
+    temporal_warp: FlashOccTemporalWarpConfig = FlashOccTemporalWarpConfig()
+    occupancy_head: FlashOccOccupancyHeadConfig = FlashOccOccupancyHeadConfig()
 
 
 def flashocc_base_config() -> FlashOccConfig:

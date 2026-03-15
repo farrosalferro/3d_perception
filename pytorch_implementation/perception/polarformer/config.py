@@ -59,6 +59,9 @@ class PolarFormerForwardConfig:
     max_num: int = 300
     score_threshold: float | None = None
     dropout: float = 0.1
+    with_box_refine: bool = True
+    strict_img_meta: bool = True
+    require_camera_geometry: bool = True
     backbone_neck: BackboneNeckConfig = BackboneNeckConfig()
     polar_neck: PolarNeckConfig = PolarNeckConfig()
 

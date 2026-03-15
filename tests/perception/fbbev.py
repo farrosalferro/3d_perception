@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import pytest
 
 torch = pytest.importorskip("torch")
 
-from pytorch_implementation.fbbev.config import debug_forward_config
-from pytorch_implementation.fbbev.model import FBBEVLite
+from pytorch_implementation.perception.fbbev.config import debug_forward_config
+from pytorch_implementation.perception.fbbev.model import FBBEVLite
 
 
 def _build_dummy_img_metas(batch_size: int) -> list[dict[str, Any]]:
@@ -63,6 +64,42 @@ def _register_hook(module, name: str, capture: dict[str, Any], handles: list) ->
     handles.append(module.register_forward_hook(_hook))
 
 
+def _assert_decoded_topk_label_score_consistency(
+    cls_scores: torch.Tensor,
+    decoded_scores: torch.Tensor,
+    decoded_labels: torch.Tensor,
+    *,
+    max_num: int,
+    num_classes: int,
+) -> None:
+    flat_scores = cls_scores.sigmoid().reshape(-1)
+    topk = min(int(max_num), int(flat_scores.numel()))
+    topk_scores, topk_indices = flat_scores.topk(topk)
+    topk_labels = (topk_indices % num_classes).to(dtype=torch.long)
+
+    assert decoded_scores.ndim == 1
+    assert decoded_labels.ndim == 1
+    assert decoded_scores.shape[0] == decoded_labels.shape[0]
+    assert decoded_scores.shape[0] <= topk
+    if decoded_scores.numel() > 1:
+        assert torch.all(decoded_scores[:-1] >= decoded_scores[1:])
+    assert torch.all((decoded_scores >= 0.0) & (decoded_scores <= 1.0))
+    if decoded_labels.numel() > 0:
+        assert decoded_labels.dtype == torch.long
+        assert int(decoded_labels.min().item()) >= 0
+        assert int(decoded_labels.max().item()) < num_classes
+
+    remaining = [(float(score), int(label)) for score, label in zip(topk_scores.tolist(), topk_labels.tolist())]
+    for score, label in zip(decoded_scores.tolist(), decoded_labels.tolist()):
+        matched_idx = None
+        for idx, (candidate_score, candidate_label) in enumerate(remaining):
+            if candidate_label == int(label) and abs(candidate_score - float(score)) <= 1e-6:
+                matched_idx = idx
+                break
+        assert matched_idx is not None, "Decoded score/label pair is inconsistent with top-k logits."
+        remaining.pop(matched_idx)
+
+
 def _conv2d_out(size: int, kernel: int, stride: int, padding: int) -> int:
     return ((size + 2 * padding - kernel) // stride) + 1
 
@@ -111,6 +148,9 @@ def instrumented_debug_forward():
     assert isinstance(outputs, dict)
     return {
         "cfg": cfg,
+        "model": model,
+        "img": img,
+        "img_metas": img_metas,
         "batch_size": batch_size,
         "height": height,
         "width": width,
@@ -217,6 +257,79 @@ def test_intermediate_shapes_match_debug_config(instrumented_debug_forward):
     assert outputs["bev_refined"].shape == expected_2d
     assert outputs["bev_fused"].shape == expected_2d
     assert outputs["bev_embed"].shape == expected_2d
+
+
+def test_metadata_contract_validation_requires_temporal_and_shape_keys():
+    cfg = debug_forward_config(max_num=24, depth_bins=6, bev_h=20, bev_w=20, bev_z=3)
+    model = FBBEVLite(cfg).eval()
+    batch_size = 2
+    height, width = 96, 160
+    img = torch.randn(batch_size, cfg.num_cams, 3, height, width)
+    img_metas = _build_dummy_img_metas(batch_size=batch_size)
+
+    with torch.no_grad():
+        outputs = model(img, img_metas, decode=False)
+    assert isinstance(outputs, dict)
+
+    missing_temporal_key = copy.deepcopy(img_metas)
+    missing_temporal_key[0].pop("sequence_group_idx")
+    with pytest.raises(KeyError, match="sequence_group_idx"):
+        model(img, missing_temporal_key, decode=False)
+
+    bad_curr_to_prev_shape = copy.deepcopy(img_metas)
+    bad_curr_to_prev_shape[0]["curr_to_prev_ego_rt"] = torch.eye(3, dtype=torch.float32)
+    with pytest.raises(ValueError, match="curr_to_prev_ego_rt"):
+        model(img, bad_curr_to_prev_shape, decode=False)
+
+    bad_curr_to_prev_values = copy.deepcopy(img_metas)
+    bad_curr_to_prev_values[0]["curr_to_prev_ego_rt"] = torch.full((4, 4), float("nan"))
+    with pytest.raises(ValueError, match="finite"):
+        model(img, bad_curr_to_prev_values, decode=False)
+
+
+def test_decode_contract_semantics_and_topk_consistency(instrumented_debug_forward):
+    data = instrumented_debug_forward
+    cfg = data["cfg"]
+    model = data["model"]
+
+    with torch.no_grad():
+        decoded_pack = model(data["img"], data["img_metas"], decode=True)
+
+    assert isinstance(decoded_pack, dict)
+    assert set(decoded_pack.keys()) == {"preds", "decoded", "decoded_occupancy"}
+    preds = decoded_pack["preds"]
+    decoded = decoded_pack["decoded"]
+    decoded_occ = decoded_pack["decoded_occupancy"]
+    assert isinstance(preds, dict)
+    assert isinstance(decoded, list)
+    assert isinstance(decoded_occ, list)
+    assert len(decoded) == data["batch_size"]
+    assert len(decoded_occ) == data["batch_size"]
+
+    cls_last = preds["all_cls_scores"][-1]
+    for batch_idx, sample in enumerate(decoded):
+        assert set(sample.keys()) == {"bboxes", "scores", "labels"}
+        assert sample["bboxes"].ndim == 2
+        assert sample["bboxes"].shape[1] == cfg.code_size
+        assert sample["scores"].ndim == 1
+        assert sample["labels"].ndim == 1
+        assert sample["scores"].shape == sample["labels"].shape
+        assert sample["scores"].shape[0] == sample["bboxes"].shape[0]
+        assert sample["labels"].dtype == torch.long
+        _assert_decoded_topk_label_score_consistency(
+            cls_last[batch_idx],
+            sample["scores"],
+            sample["labels"],
+            max_num=cfg.max_num,
+            num_classes=cfg.num_classes,
+        )
+
+    for occ in decoded_occ:
+        assert occ.shape == (cfg.bev_h, cfg.bev_w, cfg.bev_z)
+        assert occ.dtype == torch.long
+        if occ.numel() > 0:
+            assert int(occ.min().item()) >= 0
+            assert int(occ.max().item()) < cfg.occupancy_classes
 
 
 def test_intermediate_and_final_tensors_are_finite(instrumented_debug_forward):

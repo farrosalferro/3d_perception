@@ -9,6 +9,7 @@ from .backbone_neck import BackboneNeck
 from .config import PolarFormerForwardConfig
 from .head import PolarFormerHeadLite
 from .transformer import PolarTransformerDecoderLite, PolarTransformerLite
+from .utils import validate_polarformer_img_metas
 
 
 class PolarFormerLite(nn.Module):
@@ -38,10 +39,28 @@ class PolarFormerLite(nn.Module):
 
         if img.dim() != 5:
             raise ValueError(f"Expected image shape [B, Ncam, 3, H, W], got {tuple(img.shape)}")
-        _ = img_metas  # reserved for future geometry-aware neck extensions
         batch_size, num_cams, channels, height, width = img.shape
+        if self.cfg.strict_img_meta and num_cams != self.cfg.num_cams:
+            raise ValueError(f"Expected num_cams={self.cfg.num_cams}, got {num_cams}")
+        validate_polarformer_img_metas(
+            img_metas,
+            batch_size=batch_size,
+            num_cams=num_cams,
+            strict_img_meta=self.cfg.strict_img_meta,
+            require_geometry=self.cfg.require_camera_geometry,
+        )
+        input_shape = (height, width)
+        for meta in img_metas:
+            meta["input_shape"] = input_shape
         img_flat = img.reshape(batch_size * num_cams, channels, height, width)
-        return self.backbone_neck(img_flat, batch_size=batch_size, num_cams=num_cams)
+        return self.backbone_neck(
+            img_flat,
+            batch_size=batch_size,
+            num_cams=num_cams,
+            img_metas=img_metas,
+            strict_img_meta=self.cfg.strict_img_meta,
+            require_geometry=self.cfg.require_camera_geometry,
+        )
 
     def forward(
         self,

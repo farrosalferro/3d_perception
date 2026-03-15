@@ -31,9 +31,15 @@ class FBBEVForwardConfig:
     code_size: int = 9
     history_cat_num: int = 2
     history_cam_sweep_freq: float = 0.5
+    history_interpolation_mode: str = "bilinear"
     use_temporal_fusion: bool = True
+    strict_img_meta: bool = False
+    require_camera_meta: bool = False
     max_num: int = 120
     score_threshold: float | None = None
+    occupancy_classes: int = 18
+    occupancy_fix_void: bool = False
+    depth_range: Tuple[float, float] = (1.0, 60.0)
     voxel_size: Tuple[float, float] = (0.8, 0.8)
     pc_range: Tuple[float, float, float, float, float, float] = (
         -51.2,

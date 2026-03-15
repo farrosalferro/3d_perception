@@ -56,10 +56,18 @@ class SpatialCrossAttentionLite(nn.Module):
             raise ValueError("reference_points_cam and bev_mask are required.")
         if spatial_shapes is None or level_start_index is None:
             raise ValueError("spatial_shapes and level_start_index are required.")
+        if query.dim() != 3:
+            raise ValueError(f"query must have shape [B, num_query, C], got {tuple(query.shape)}")
         if key is None:
             key = query
         if value is None:
             value = key
+        if key.dim() != 4 or value.dim() != 4:
+            raise ValueError(
+                f"key/value must have shape [num_cam, num_value, B, C], got {tuple(key.shape)} / {tuple(value.shape)}"
+            )
+        if key.shape != value.shape:
+            raise ValueError(f"key/value shape mismatch: {tuple(key.shape)} vs {tuple(value.shape)}")
 
         if residual is None:
             inp_residual = query
@@ -72,6 +80,31 @@ class SpatialCrossAttentionLite(nn.Module):
             query = query + query_pos
 
         bs, num_query, _ = query.size()
+        if key.shape[0] != self.num_cams:
+            raise ValueError(f"Expected key/value first dim num_cams={self.num_cams}, got {key.shape[0]}")
+        if reference_points_cam.dim() != 5:
+            raise ValueError(
+                "reference_points_cam must have shape [num_cam, B, num_query, num_depth, 2], "
+                f"got {tuple(reference_points_cam.shape)}"
+            )
+        if bev_mask.dim() != 4:
+            raise ValueError(
+                f"bev_mask must have shape [num_cam, B, num_query, num_depth], got {tuple(bev_mask.shape)}"
+            )
+        if reference_points_cam.shape[0] != self.num_cams:
+            raise ValueError(
+                f"reference_points_cam first dim must be num_cams={self.num_cams}, got {reference_points_cam.shape[0]}"
+            )
+        if reference_points_cam.shape[1] != bs or reference_points_cam.shape[2] != num_query:
+            raise ValueError(
+                "reference_points_cam shape mismatch with query: "
+                f"expected [num_cam, {bs}, {num_query}, D, 2], got {tuple(reference_points_cam.shape)}"
+            )
+        if bev_mask.shape[:3] != reference_points_cam.shape[:3]:
+            raise ValueError(
+                f"bev_mask shape {tuple(bev_mask.shape)} must match reference_points_cam prefix "
+                f"{tuple(reference_points_cam.shape[:3])}"
+            )
         num_depth = reference_points_cam.size(3)
 
         indexes = []

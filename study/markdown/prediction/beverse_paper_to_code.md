@@ -1,6 +1,6 @@
 # BEVerse Paper-to-Code Study Guide (Prediction)
 
-This note maps BEVerse-style prediction concepts to the pure-PyTorch educational implementation in this repository.
+This note maps BEVerse-style prediction concepts to the pure-PyTorch strict-parity implementation in this repository.
 
 Primary references:
 - Paper: [BEVerse: Unified Perception and Prediction in Bird's-Eye View for Vision-Centric Autonomous Driving](https://arxiv.org/abs/2205.09743)
@@ -244,9 +244,9 @@ flowchart LR
 3. Read Chunk 2 and Chunk 3 for temporal decoding and multimodal outputs.
 4. Read Chunk 4 and then inspect `tests/prediction/beverse.py`.
 
-## 7) Known implementation simplifications
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- The full BEVerse joint perception stack is reduced to a prediction-focused educational slice.
-- BEV construction uses camera mean + adaptive pooling instead of geometry-heavy view transformation.
-- Temporal decoding uses a compact GRU (single-frame context) for deterministic and fast tests.
-- Decode uses argmax mode probability, while evaluation utilities also provide ADE-based best-mode selection.
+- Behavioral parity is pinned to frozen BEVerse anchors in `study/markdown/strict_parity_anchor_manifest.md`.
+- Multi-task contract (`map`, `3dod`, `motion`) is preserved with strict task-output ordering and motion decode semantics.
+- Temporal neck behavior keeps sequence validity and time-index contracts, including monotonic horizon checks.
+- Framework/runtime dependencies are replaced with pure PyTorch modules while preserving trajectory mode semantics.

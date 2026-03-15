@@ -31,6 +31,8 @@ class MapTRForwardConfig:
     num_decoder_layers: int = 6
     bev_h: int = 30
     bev_w: int = 30
+    query_embed_type: str = "instance_pts"
+    with_box_refine: bool = True
     code_size: int = 2
     pc_range: Tuple[float, float, float, float, float, float] = (
         -15.0,
@@ -40,10 +42,22 @@ class MapTRForwardConfig:
         30.0,
         2.0,
     )
-    post_center_range: Tuple[float, float, float, float] = (-20.0, -35.0, 20.0, 35.0)
+    # MapTR coder contract for xyxy decode filtering:
+    # [x_min, y_min, x_min, y_min, x_max, y_max, x_max, y_max].
+    post_center_range: Tuple[float, float, float, float, float, float, float, float] = (
+        -20.0,
+        -35.0,
+        -20.0,
+        -35.0,
+        20.0,
+        35.0,
+        20.0,
+        35.0,
+    )
     max_num: int = 50
     score_threshold: float | None = None
     dropout: float = 0.1
+    strict_img_meta: bool = True
     backbone_neck: BackboneNeckConfig = BackboneNeckConfig()
 
     @property

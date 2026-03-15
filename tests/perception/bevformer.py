@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from typing import Any
 
@@ -9,8 +10,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from pure_torch_bevformer.config import debug_forward_config
-from pure_torch_bevformer.model import BEVFormerLite
+from pytorch_implementation.perception.bevformer.config import debug_forward_config
+from pytorch_implementation.perception.bevformer.model import BEVFormerLite
 
 
 def _build_dummy_img_metas(
@@ -80,6 +81,42 @@ def _register_hook(module, name: str, capture: dict[str, Any], handles: list) ->
     handles.append(module.register_forward_hook(_hook))
 
 
+def _assert_decoded_topk_label_score_consistency(
+    cls_scores: torch.Tensor,
+    decoded_scores: torch.Tensor,
+    decoded_labels: torch.Tensor,
+    *,
+    max_num: int,
+    num_classes: int,
+) -> None:
+    flat_scores = cls_scores.sigmoid().reshape(-1)
+    topk = min(int(max_num), int(flat_scores.numel()))
+    topk_scores, topk_indices = flat_scores.topk(topk)
+    topk_labels = (topk_indices % num_classes).to(dtype=torch.long)
+
+    assert decoded_scores.ndim == 1
+    assert decoded_labels.ndim == 1
+    assert decoded_scores.shape[0] == decoded_labels.shape[0]
+    assert decoded_scores.shape[0] <= topk
+    if decoded_scores.numel() > 1:
+        assert torch.all(decoded_scores[:-1] >= decoded_scores[1:])
+    assert torch.all((decoded_scores >= 0.0) & (decoded_scores <= 1.0))
+    if decoded_labels.numel() > 0:
+        assert decoded_labels.dtype == torch.long
+        assert int(decoded_labels.min().item()) >= 0
+        assert int(decoded_labels.max().item()) < num_classes
+
+    remaining = [(float(score), int(label)) for score, label in zip(topk_scores.tolist(), topk_labels.tolist())]
+    for score, label in zip(decoded_scores.tolist(), decoded_labels.tolist()):
+        matched_idx = None
+        for idx, (candidate_score, candidate_label) in enumerate(remaining):
+            if candidate_label == int(label) and abs(candidate_score - float(score)) <= 1e-6:
+                matched_idx = idx
+                break
+        assert matched_idx is not None, "Decoded score/label pair is inconsistent with top-k logits."
+        remaining.pop(matched_idx)
+
+
 def _conv2d_out(size: int, kernel: int, stride: int, padding: int) -> int:
     return ((size + 2 * padding - kernel) // stride) + 1
 
@@ -144,6 +181,9 @@ def instrumented_debug_forward():
     assert isinstance(outputs, dict)
     return {
         "cfg": cfg,
+        "model": model,
+        "img": img,
+        "img_metas": img_metas,
         "batch_size": batch_size,
         "height": height,
         "width": width,
@@ -257,6 +297,132 @@ def test_intermediate_shapes_match_debug_config(instrumented_debug_forward):
     assert outputs["bev_embed"].shape == (expected_hw, batch_size, expected_c)
     assert outputs["all_cls_scores"].shape == (cfg.num_decoder_layers, batch_size, expected_q, cfg.num_classes)
     assert outputs["all_bbox_preds"].shape == (cfg.num_decoder_layers, batch_size, expected_q, 10)
+
+
+def test_metadata_contract_validation_requires_keys_and_shapes():
+    cfg = debug_forward_config("tiny", bev_hw=(12, 12), num_queries=24, encoder_layers=2, decoder_layers=2)
+    model = BEVFormerLite(cfg).eval()
+    batch_size = 1
+    height, width = 96, 160
+    img = torch.randn(batch_size, cfg.num_cams, 3, height, width)
+    img_metas = _build_dummy_img_metas(
+        batch_size=batch_size,
+        num_cams=cfg.num_cams,
+        height=height,
+        width=width,
+        can_bus_dims=cfg.can_bus_dims,
+    )
+
+    with torch.no_grad():
+        outputs = model(img, img_metas, decode=False)
+    assert isinstance(outputs, dict)
+
+    missing_can_bus = copy.deepcopy(img_metas)
+    missing_can_bus[0].pop("can_bus")
+    with pytest.raises(KeyError, match="can_bus"):
+        model(img, missing_can_bus, decode=False)
+
+    bad_can_bus = copy.deepcopy(img_metas)
+    bad_can_bus[0]["can_bus"] = bad_can_bus[0]["can_bus"][:-1]
+    with pytest.raises(ValueError, match="can_bus"):
+        model(img, bad_can_bus, decode=False)
+
+    bad_lidar2img = copy.deepcopy(img_metas)
+    bad_lidar2img[0]["lidar2img"] = bad_lidar2img[0]["lidar2img"][:-1]
+    with pytest.raises(ValueError, match="lidar2img"):
+        model(img, bad_lidar2img, decode=False)
+
+
+def test_decode_contract_semantics_and_topk_consistency(instrumented_debug_forward):
+    data = instrumented_debug_forward
+    cfg = data["cfg"]
+    model = data["model"]
+
+    with torch.no_grad():
+        decoded_pack = model(data["img"], data["img_metas"], decode=True)
+
+    assert isinstance(decoded_pack, dict)
+    assert set(decoded_pack.keys()) == {"preds", "decoded"}
+    preds = decoded_pack["preds"]
+    decoded = decoded_pack["decoded"]
+    assert isinstance(preds, dict)
+    assert isinstance(decoded, list)
+    assert len(decoded) == data["batch_size"]
+
+    cls_last = preds["all_cls_scores"][-1]
+    for batch_idx, sample in enumerate(decoded):
+        assert set(sample.keys()) == {"bboxes", "scores", "labels"}
+        assert sample["bboxes"].ndim == 2
+        assert sample["bboxes"].shape[1] == 9
+        assert sample["scores"].ndim == 1
+        assert sample["labels"].ndim == 1
+        assert sample["scores"].shape == sample["labels"].shape
+        assert sample["scores"].shape[0] == sample["bboxes"].shape[0]
+        assert sample["labels"].dtype == torch.long
+        _assert_decoded_topk_label_score_consistency(
+            cls_last[batch_idx],
+            sample["scores"],
+            sample["labels"],
+            max_num=cfg.max_num,
+            num_classes=cfg.num_classes,
+        )
+
+
+def test_prev_bev_shift_and_rotation_paths_change_temporal_bev(instrumented_debug_forward):
+    data = instrumented_debug_forward
+    cfg = data["cfg"]
+    model = data["model"]
+    transformer = model.head.transformer
+    batch_size = data["batch_size"]
+    bev_tokens = cfg.bev_h * cfg.bev_w
+
+    prev_bev_bhw = torch.randn(batch_size, bev_tokens, cfg.embed_dims)
+    prev_bev_hwb = transformer._normalize_prev_bev_layout(
+        prev_bev_bhw,
+        bev_h=cfg.bev_h,
+        bev_w=cfg.bev_w,
+        batch_size=batch_size,
+    )
+    assert prev_bev_hwb.shape == (bev_tokens, batch_size, cfg.embed_dims)
+
+    no_rotation = transformer._rotate_prev_bev(
+        prev_bev_hwb,
+        rotation_angles=torch.zeros(batch_size),
+        bev_h=cfg.bev_h,
+        bev_w=cfg.bev_w,
+    )
+    with_rotation = transformer._rotate_prev_bev(
+        prev_bev_hwb,
+        rotation_angles=torch.full((batch_size,), 15.0),
+        bev_h=cfg.bev_h,
+        bev_w=cfg.bev_w,
+    )
+    assert torch.allclose(no_rotation, prev_bev_hwb)
+    assert not torch.allclose(with_rotation, prev_bev_hwb)
+
+    temporal_metas = copy.deepcopy(data["img_metas"])
+    temporal_metas[0]["can_bus"][0] = 1.5
+    temporal_metas[0]["can_bus"][1] = -0.75
+    temporal_metas[0]["can_bus"][-2] = math.pi / 6.0
+    temporal_metas[0]["can_bus"][-1] = 10.0
+
+    with torch.no_grad():
+        temporal_bev = model(data["img"], temporal_metas, prev_bev=prev_bev_bhw, only_bev=True)
+
+    old_use_shift = transformer.use_shift
+    old_rotate_prev_bev = transformer.rotate_prev_bev
+    try:
+        transformer.use_shift = False
+        transformer.rotate_prev_bev = False
+        with torch.no_grad():
+            no_temporal_adjust_bev = model(data["img"], temporal_metas, prev_bev=prev_bev_bhw, only_bev=True)
+    finally:
+        transformer.use_shift = old_use_shift
+        transformer.rotate_prev_bev = old_rotate_prev_bev
+
+    assert temporal_bev.shape == (batch_size, bev_tokens, cfg.embed_dims)
+    assert no_temporal_adjust_bev.shape == temporal_bev.shape
+    assert not torch.allclose(temporal_bev, no_temporal_adjust_bev)
 
 
 def test_intermediate_and_final_tensors_are_finite(instrumented_debug_forward):

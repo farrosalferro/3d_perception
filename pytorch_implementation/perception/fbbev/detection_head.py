@@ -19,6 +19,8 @@ class FBBEVDetectionHeadLite(nn.Module):
         self.num_classes = cfg.num_classes
         self.code_size = cfg.code_size
         self.max_num = cfg.max_num
+        self.occupancy_classes = int(cfg.occupancy_classes)
+        self.fix_void = bool(cfg.occupancy_fix_void)
         self.pc_range = cfg.pc_range
         self.bev_h = cfg.bev_h
         self.bev_w = cfg.bev_w
@@ -30,6 +32,13 @@ class FBBEVDetectionHeadLite(nn.Module):
         )
         self.heatmap_head = nn.Conv2d(channels, self.num_classes, kernel_size=1)
         self.reg_head = nn.Conv2d(channels, self.code_size, kernel_size=1)
+        occ_channels = max(channels // 2, 1)
+        self.occ_refine = nn.Sequential(
+            nn.Conv3d(channels, occ_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm3d(occ_channels),
+            nn.ReLU(inplace=True),
+        )
+        self.occ_classifier = nn.Conv3d(occ_channels, self.occupancy_classes, kernel_size=1)
         self.bbox_coder = FBBEVBoxCoderLite(
             post_center_range=cfg.post_center_range,
             max_num=cfg.max_num,
@@ -83,18 +92,47 @@ class FBBEVDetectionHeadLite(nn.Module):
         query_cls = query_cls + topk_scores.unsqueeze(-1).detach() * 0.0
         return query_cls, query_bbox
 
-    def forward(self, bev_embed: torch.Tensor) -> dict[str, torch.Tensor]:
+    def _forward_occupancy(self, bev_volume: torch.Tensor) -> torch.Tensor:
+        if bev_volume.dim() != 5:
+            raise ValueError(f"Expected bev_volume [B, C, H, W, Z], got {tuple(bev_volume.shape)}")
+        occ_input = bev_volume.permute(0, 1, 4, 2, 3).contiguous()  # [B, C, Z, H, W]
+        occ_feat = self.occ_refine(occ_input)
+        occ_logits = self.occ_classifier(occ_feat).permute(0, 1, 3, 4, 2).contiguous()
+        return occ_logits
+
+    def forward(self, bev_embed: torch.Tensor, *, bev_volume: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
+        if bev_embed.dim() != 4:
+            raise ValueError(f"Expected bev_embed [B, C, H, W], got {tuple(bev_embed.shape)}")
         shared = self.shared(bev_embed)
         cls_map = self.heatmap_head(shared)
         reg_map = self.reg_head(shared)
         bbox_map = self._decode_reg_map(reg_map)
         query_cls, query_bbox = self._select_topk_queries(cls_map, bbox_map)
+        if bev_volume is None:
+            bev_volume = bev_embed.unsqueeze(-1)
+        occupancy_logits = self._forward_occupancy(bev_volume)
         return {
             "all_cls_scores": query_cls.unsqueeze(0),
             "all_bbox_preds": query_bbox.unsqueeze(0),
             "dense_cls_logits": cls_map,
             "dense_bbox_map": bbox_map,
+            "occupancy_logits": occupancy_logits,
+            "output_voxels": [occupancy_logits],
         }
 
     def get_bboxes(self, preds_dicts: dict[str, torch.Tensor]) -> list[dict[str, torch.Tensor]]:
         return self.bbox_coder.decode(preds_dicts)
+
+    def decode_occupancy(
+        self,
+        preds_dicts: dict[str, torch.Tensor],
+        *,
+        fix_void: bool | None = None,
+        return_raw_occ: bool = False,
+    ) -> list[torch.Tensor]:
+        occupancy_logits = preds_dicts["occupancy_logits"]
+        return self.bbox_coder.decode_occupancy(
+            occupancy_logits,
+            fix_void=self.fix_void if fix_void is None else bool(fix_void),
+            return_raw_occ=return_raw_occ,
+        )

@@ -7,11 +7,14 @@ from typing import Sequence
 
 import torch
 
+from .utils import denormalize_bbox
+
 
 @dataclass
 class NMSFreeCoderLite:
     """Minimal StreamPETR-style top-k decode over query/class logits."""
 
+    pc_range: Sequence[float]
     post_center_range: Sequence[float] | None
     max_num: int
     num_classes: int
@@ -19,25 +22,34 @@ class NMSFreeCoderLite:
 
     def decode_single(self, cls_scores: torch.Tensor, bbox_preds: torch.Tensor) -> dict[str, torch.Tensor]:
         cls_scores = cls_scores.sigmoid()
-        scores, indices = cls_scores.reshape(-1).topk(self.max_num)
+        topk = min(self.max_num, cls_scores.numel())
+        scores, indices = cls_scores.reshape(-1).topk(topk)
         labels = indices % self.num_classes
         bbox_indices = torch.div(indices, self.num_classes, rounding_mode="floor")
-        bboxes = bbox_preds[bbox_indices]
+        bbox_preds = bbox_preds[bbox_indices]
 
-        keep = torch.ones_like(scores, dtype=torch.bool)
+        final_box_preds = denormalize_bbox(bbox_preds, self.pc_range)
+        final_scores = scores
+        final_preds = labels
+
+        keep = torch.ones_like(final_scores, dtype=torch.bool)
         if self.score_threshold is not None:
-            keep = keep & (scores > self.score_threshold)
+            keep = keep & (final_scores >= self.score_threshold)
 
-        if self.post_center_range is not None:
-            post_range = torch.as_tensor(
-                self.post_center_range,
-                dtype=bboxes.dtype,
-                device=bboxes.device,
+        if self.post_center_range is None:
+            raise NotImplementedError(
+                "Need post_center_range to reorganize output as a batch in NMSFreeCoderLite."
             )
-            center = bboxes[..., :3]
-            keep = keep & (center >= post_range[:3]).all(dim=1) & (center <= post_range[3:]).all(dim=1)
 
-        return {"bboxes": bboxes[keep], "scores": scores[keep], "labels": labels[keep]}
+        post_range = torch.as_tensor(
+            self.post_center_range,
+            dtype=final_box_preds.dtype,
+            device=final_box_preds.device,
+        )
+        center = final_box_preds[..., :3]
+        keep = keep & (center >= post_range[:3]).all(dim=1) & (center <= post_range[3:]).all(dim=1)
+
+        return {"bboxes": final_box_preds[keep], "scores": final_scores[keep], "labels": final_preds[keep]}
 
     def decode(self, preds_dicts: dict[str, torch.Tensor]) -> list[dict[str, torch.Tensor]]:
         all_cls_scores = preds_dicts["all_cls_scores"][-1]

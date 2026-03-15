@@ -31,6 +31,15 @@ class Sparse4DForwardConfig:
     box_code_size: int = 11
     max_detections: int = 100
     dropout: float = 0.1
+    num_single_frame_decoder: int = 1
+    num_temp_instances: int = 0
+    default_time_interval: float = 0.5
+    confidence_decay: float = 0.6
+    max_time_interval: float = 2.0
+    refine_yaw: bool = True
+    normalize_yaw: bool = False
+    score_threshold: float | None = None
+    sorted_decoding: bool = True
     backbone_neck: BackboneNeckConfig = BackboneNeckConfig()
 
 

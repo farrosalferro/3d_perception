@@ -1,8 +1,9 @@
-"""Math and positional-encoding helpers for PETR."""
+"""Math, metadata, and positional-encoding helpers for PETR."""
 
 from __future__ import annotations
 
 import math
+from typing import Any, Sequence
 
 import torch
 from torch import nn
@@ -31,6 +32,132 @@ def pos2posemb3d(pos: torch.Tensor, num_pos_feats: int = 128, temperature: int =
     pos_y = torch.stack((pos_y[..., 0::2].sin(), pos_y[..., 1::2].cos()), dim=-1).flatten(-2)
     pos_z = torch.stack((pos_z[..., 0::2].sin(), pos_z[..., 1::2].cos()), dim=-1).flatten(-2)
     return torch.cat((pos_y, pos_x, pos_z), dim=-1)
+
+
+def denormalize_bbox(normalized_bboxes: torch.Tensor, pc_range: Sequence[float]) -> torch.Tensor:
+    """Mirror PETR/MMDet3D decode format restoration for box dimensions and yaw."""
+
+    del pc_range  # Kept for signature parity with upstream helper.
+    rot_sine = normalized_bboxes[..., 6:7]
+    rot_cosine = normalized_bboxes[..., 7:8]
+    rot = torch.atan2(rot_sine, rot_cosine)
+
+    cx = normalized_bboxes[..., 0:1]
+    cy = normalized_bboxes[..., 1:2]
+    cz = normalized_bboxes[..., 4:5]
+
+    w = normalized_bboxes[..., 2:3].exp()
+    l = normalized_bboxes[..., 3:4].exp()
+    h = normalized_bboxes[..., 5:6].exp()
+    if normalized_bboxes.size(-1) > 8:
+        vx = normalized_bboxes[..., 8:9]
+        vy = normalized_bboxes[..., 9:10]
+        return torch.cat((cx, cy, cz, w, l, h, rot, vx, vy), dim=-1)
+    return torch.cat((cx, cy, cz, w, l, h, rot), dim=-1)
+
+
+def _shape_hw(
+    shape: Any,
+    *,
+    field_name: str,
+    batch_idx: int,
+    cam_idx: int,
+) -> tuple[int, int]:
+    if not isinstance(shape, (list, tuple)) or len(shape) < 2:
+        raise ValueError(
+            f"img_metas[{batch_idx}]['{field_name}'][{cam_idx}] must be a sequence"
+            f" with at least (H, W), got {shape!r}."
+        )
+    h, w = int(shape[0]), int(shape[1])
+    if h <= 0 or w <= 0:
+        raise ValueError(
+            f"img_metas[{batch_idx}]['{field_name}'][{cam_idx}] has non-positive size {(h, w)}."
+        )
+    return h, w
+
+
+def validate_petr_img_metas(
+    img_metas: list[dict[str, Any]],
+    *,
+    batch_size: int | None = None,
+    num_cams: int | None = None,
+) -> None:
+    """Validate the subset of `img_metas` contract used by PETR forward."""
+
+    if not isinstance(img_metas, list):
+        raise TypeError(f"img_metas must be a list[dict], got {type(img_metas)}.")
+    if not img_metas:
+        raise ValueError("img_metas must not be empty.")
+    if batch_size is not None and len(img_metas) != batch_size:
+        raise ValueError(f"img_metas length {len(img_metas)} does not match batch size {batch_size}.")
+
+    for batch_idx, meta in enumerate(img_metas):
+        if not isinstance(meta, dict):
+            raise TypeError(f"img_metas[{batch_idx}] must be a dict, got {type(meta)}.")
+        if "img_shape" not in meta:
+            raise KeyError(f"img_metas[{batch_idx}] is missing required key 'img_shape'.")
+        if "lidar2img" not in meta:
+            raise KeyError(f"img_metas[{batch_idx}] is missing required key 'lidar2img'.")
+
+        img_shapes = meta["img_shape"]
+        pad_shapes = meta.get("pad_shape", img_shapes)
+        lidar2img = meta["lidar2img"]
+        if not isinstance(img_shapes, (list, tuple)):
+            raise TypeError(f"img_metas[{batch_idx}]['img_shape'] must be a sequence, got {type(img_shapes)}.")
+        if not isinstance(pad_shapes, (list, tuple)):
+            raise TypeError(f"img_metas[{batch_idx}]['pad_shape'] must be a sequence, got {type(pad_shapes)}.")
+        if not isinstance(lidar2img, (list, tuple)):
+            raise TypeError(f"img_metas[{batch_idx}]['lidar2img'] must be a sequence, got {type(lidar2img)}.")
+
+        expected_num_cams = int(num_cams) if num_cams is not None else len(img_shapes)
+        if len(img_shapes) != expected_num_cams:
+            raise ValueError(
+                f"img_metas[{batch_idx}]['img_shape'] has {len(img_shapes)} cameras,"
+                f" expected {expected_num_cams}."
+            )
+        if len(pad_shapes) != expected_num_cams:
+            raise ValueError(
+                f"img_metas[{batch_idx}]['pad_shape'] has {len(pad_shapes)} cameras,"
+                f" expected {expected_num_cams}."
+            )
+        if len(lidar2img) != expected_num_cams:
+            raise ValueError(
+                f"img_metas[{batch_idx}]['lidar2img'] has {len(lidar2img)} matrices,"
+                f" expected {expected_num_cams}."
+            )
+
+        for cam_idx in range(expected_num_cams):
+            _shape_hw(img_shapes[cam_idx], field_name="img_shape", batch_idx=batch_idx, cam_idx=cam_idx)
+            _shape_hw(pad_shapes[cam_idx], field_name="pad_shape", batch_idx=batch_idx, cam_idx=cam_idx)
+            cam_mat = torch.as_tensor(lidar2img[cam_idx])
+            if cam_mat.shape != (4, 4):
+                raise ValueError(
+                    f"img_metas[{batch_idx}]['lidar2img'][{cam_idx}] must be 4x4, got {tuple(cam_mat.shape)}."
+                )
+
+
+def build_img2lidars(
+    img_metas: list[dict[str, Any]],
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+    num_cams: int,
+) -> torch.Tensor:
+    """Build [B, Ncam, 4, 4] inverse projection matrices from metadata."""
+
+    validate_petr_img_metas(img_metas, batch_size=len(img_metas), num_cams=num_cams)
+    img2lidars: list[torch.Tensor] = []
+    for batch_idx, meta in enumerate(img_metas):
+        matrices = []
+        for cam_idx, lidar2img in enumerate(meta["lidar2img"]):
+            cam_mat = torch.as_tensor(lidar2img, device=device, dtype=dtype)
+            if cam_mat.shape != (4, 4):
+                raise ValueError(
+                    f"img_metas[{batch_idx}]['lidar2img'][{cam_idx}] must be 4x4, got {tuple(cam_mat.shape)}."
+                )
+            matrices.append(torch.linalg.inv(cam_mat))
+        img2lidars.append(torch.stack(matrices, dim=0))
+    return torch.stack(img2lidars, dim=0)
 
 
 class SinePositionalEncoding2D(nn.Module):

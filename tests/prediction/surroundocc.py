@@ -112,6 +112,7 @@ def instrumented_debug_forward():
         "capture": capture,
         "outputs": outputs,
         "decoded": decoded,
+        "model": model,
         "history_bev": history_bev,
         "agent_states": agent_states,
         "metric_smoke": metric_smoke,
@@ -292,3 +293,124 @@ def test_prediction_task_specific_integrity_checks(instrumented_debug_forward):
     assert torch.isfinite(torch.tensor(metric_smoke["ade"]))
     assert torch.isfinite(torch.tensor(metric_smoke["fde"]))
     assert 0.0 <= occ_iou <= 1.0
+
+
+def test_time_index_contract_validation_and_monotonicity():
+    cfg = debug_forward_config(
+        history_steps=4,
+        future_steps=5,
+        num_agents=6,
+        in_channels=16,
+        embed_dims=64,
+        bev_hw=(24, 24),
+        depth_bins=4,
+    )
+    model = SurroundOccPredictionLite(cfg).eval()
+    history_bev = torch.randn(1, cfg.history_steps, cfg.in_channels, cfg.bev_hw[0], cfg.bev_hw[1])
+    agent_states = torch.randn(1, cfg.num_agents, 4)
+    history_time = torch.tensor([0.0, 0.7, 1.6, 2.8], dtype=history_bev.dtype)
+    future_time = torch.tensor([0.4, 1.0, 1.9, 3.3, 5.2], dtype=history_bev.dtype)
+
+    with torch.no_grad():
+        outputs = model(
+            history_bev,
+            agent_states,
+            history_time_indices=history_time,
+            future_time_indices=future_time,
+            decode=False,
+        )
+    assert outputs["future_time_indices"].shape == (1, cfg.future_steps)
+    assert torch.allclose(outputs["future_time_indices"][0], future_time, atol=1e-6, rtol=1e-6)
+    assert bool(torch.all(outputs["future_time_indices"][:, 1:] > outputs["future_time_indices"][:, :-1]))
+
+    with pytest.raises(ValueError, match="strictly increasing"):
+        model(
+            history_bev,
+            agent_states,
+            history_time_indices=torch.tensor([0.0, 1.0, 1.0, 2.0], dtype=history_bev.dtype),
+            decode=False,
+        )
+    with pytest.raises(ValueError, match="strictly increasing"):
+        model(
+            history_bev,
+            agent_states,
+            future_time_indices=torch.tensor([0.4, 1.0, 0.9, 1.8, 3.0], dtype=history_bev.dtype),
+            decode=False,
+        )
+
+
+def test_decode_parity_semantics_for_occupancy_and_trajectory(instrumented_debug_forward):
+    cfg = instrumented_debug_forward["cfg"]
+    outputs = instrumented_debug_forward["outputs"]
+    decoded = instrumented_debug_forward["decoded"]
+
+    occupancy_probs = torch.softmax(outputs["occupancy_logits"], dim=2)
+    expected_occupied_prob = 1.0 - occupancy_probs[:, :, 0]
+    expected_occupancy = expected_occupied_prob > 0.5
+    expected_semantic = occupancy_probs.argmax(dim=2) if cfg.occupancy_classes > 1 else None
+
+    for batch_idx, sample in enumerate(decoded):
+        expected_keys = {
+            "occupancy",
+            "occupancy_prob",
+            "trajectory",
+            "velocity",
+            "future_time_indices",
+        }
+        if cfg.occupancy_classes > 1:
+            expected_keys.add("occupancy_semantic")
+        assert set(sample.keys()) == expected_keys
+        assert sample["occupancy"].dtype == torch.bool
+        assert sample["occupancy"].shape[0] == cfg.future_steps
+        assert sample["occupancy"].shape[1] == cfg.depth_bins
+        assert torch.equal(sample["occupancy"], expected_occupancy[batch_idx])
+        assert torch.allclose(sample["occupancy_prob"], expected_occupied_prob[batch_idx], atol=1e-6, rtol=1e-6)
+        assert torch.allclose(sample["trajectory"], outputs["trajectory"][batch_idx], atol=1e-6, rtol=1e-6)
+        assert torch.allclose(sample["velocity"], outputs["velocity"][batch_idx], atol=1e-6, rtol=1e-6)
+        assert torch.allclose(
+            sample["future_time_indices"],
+            outputs["future_time_indices"][batch_idx],
+            atol=1e-6,
+            rtol=1e-6,
+        )
+        assert bool(torch.all(sample["future_time_indices"][1:] > sample["future_time_indices"][:-1]))
+        if expected_semantic is not None:
+            assert torch.equal(sample["occupancy_semantic"], expected_semantic[batch_idx])
+
+
+def test_future_time_deltas_control_trajectory_integration():
+    cfg = debug_forward_config(
+        history_steps=4,
+        future_steps=5,
+        num_agents=6,
+        in_channels=16,
+        embed_dims=64,
+        bev_hw=(24, 24),
+        depth_bins=4,
+    )
+    model = SurroundOccPredictionLite(cfg).eval()
+    history_bev = torch.randn(2, cfg.history_steps, cfg.in_channels, cfg.bev_hw[0], cfg.bev_hw[1])
+    agent_states = torch.randn(2, cfg.num_agents, 4)
+    future_time = torch.tensor([0.3, 1.1, 2.4, 4.2, 6.5], dtype=history_bev.dtype)
+
+    with torch.no_grad():
+        outputs = model(
+            history_bev,
+            agent_states,
+            future_time_indices=future_time,
+            decode=False,
+        )
+
+    time_deltas = torch.cat((future_time[:1], future_time[1:] - future_time[:-1]), dim=0)
+    expected_trajectory = agent_states[..., :2].unsqueeze(2) + torch.cumsum(
+        outputs["velocity"] * time_deltas.view(1, 1, cfg.future_steps, 1),
+        dim=2,
+    )
+    assert torch.allclose(outputs["trajectory"], expected_trajectory, atol=1e-5, rtol=1e-5)
+
+    consistency_error = trajectory_consistency_error(
+        outputs["trajectory"],
+        outputs["velocity"],
+        dt=time_deltas,
+    )
+    assert consistency_error.item() < 1e-5

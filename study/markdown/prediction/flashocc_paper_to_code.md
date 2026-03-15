@@ -311,12 +311,9 @@ flowchart LR
 5. Study Chunk 4 (decode + metrics).
 6. Validate understanding using the tensor trace and drills.
 
-## 7) Known implementation simplifications in this repo
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- The model is prediction-focused and uses occupancy as direct input (no camera/lidar raw pipeline).
-- Temporal fusion is Conv1D-based for speed; no explicit ego-motion warping.
-- Trajectory decode is top-k query selection without map constraints.
-- Metrics are smoke-level ADE/FDE/smoothness checks, not full benchmark evaluation.
-
-These choices keep the model compact and testable while preserving key prediction contracts.
-
+- Behavioral parity is pinned to frozen FlashOCC anchors in `study/markdown/strict_parity_anchor_manifest.md`.
+- BEV depth/view-transform behavior keeps depth-probability lifting and BEV aggregation tensor contracts.
+- Temporal history alignment uses pure PyTorch warping with explicit transform-conditioned grids.
+- Occupancy and trajectory decode follow strict top-k/mode and voxel-label contracts.

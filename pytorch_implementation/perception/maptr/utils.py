@@ -9,6 +9,15 @@ import torch
 from torch import nn
 
 
+def inverse_sigmoid(x: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
+    """Numerically stable inverse-sigmoid used by iterative reference updates."""
+
+    if eps <= 0.0:
+        raise ValueError(f"eps must be > 0, got {eps}")
+    x = x.clamp(min=eps, max=1.0 - eps)
+    return torch.log(x / (1.0 - x))
+
+
 def points_to_boxes(pts: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
     """Convert normalized polyline points [B, V, P, 2] into [B, V, 4] cxcywh boxes."""
 

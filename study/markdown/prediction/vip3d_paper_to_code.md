@@ -9,7 +9,7 @@
 - Notebook: `study/notebook/prediction/vip3d_paper_to_code.ipynb`
 - Paper/source: external reference (local PDF not currently present): [VIP3D paper](https://arxiv.org/abs/2203.08376)
 
-This reimplementation is an educational, pure-PyTorch forward path that keeps the core trajectory-prediction structure:
+This reimplementation is a strict-parity, pure-PyTorch forward path that keeps the core trajectory-prediction structure:
 1) temporal agent encoding,
 2) map token encoding,
 3) agent-map fusion,

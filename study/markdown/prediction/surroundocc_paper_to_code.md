@@ -255,10 +255,9 @@ flowchart LR
 5. Confirm decode and metric smoke path (Chunk 4).
 6. Run `tests/prediction/surroundocc.py` and compare observed shapes to this note.
 
-## 7) Known simplifications in this repo
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- Uses BEV history tensors directly rather than raw multi-camera image lifting.
-- Uses GRU temporal aggregation instead of transformer temporal attention.
-- Uses compact conv blocks and single-scale occupancy decoding for fast tests.
-- Uses synthetic metric smoke checks (ADE/FDE/IoU) rather than benchmark protocol.
-- Focuses on shape and contract clarity for study-first pure PyTorch understanding.
+- Behavioral parity is pinned to frozen SurroundOcc anchors in `study/markdown/strict_parity_anchor_manifest.md`.
+- Camera-view fusion and volumetric occupancy decode preserve voxel/time-axis ordering with strict metadata validation.
+- Temporal contracts enforce monotonic `history_time_indices` and `future_time_indices`.
+- Cross-attention/custom kernels are replaced by pure PyTorch projection + `grid_sample` aggregation.

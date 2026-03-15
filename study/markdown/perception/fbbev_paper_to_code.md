@@ -5,8 +5,8 @@ This note maps FB-BEV paper symbols/equations to the pure-PyTorch forward implem
 Primary references:
 - Paper: `/media/farrosalferro/College/study/3d_perception/papers/FB-BEV.pdf`
 - Reference implementation: `/media/farrosalferro/College/study/3d_perception/repos/FB-BEV/`
-- Pure-PyTorch implementation: `pytorch_implementation/fbbev/`
-- Intermediate tensor tests: `tests/fbbev/test_intermediate_tensors.py`
+- Pure-PyTorch implementation: `pytorch_implementation/perception/fbbev/`
+- Intermediate tensor tests: `tests/perception/fbbev.py`
 
 ## 1) Canonical study setup (fixed debug run)
 
@@ -32,7 +32,7 @@ Expected model outputs:
 - `all_cls_scores`: `[L, B, Q, num_classes] = [1, 2, 48, 10]`
 - `all_bbox_preds`: `[L, B, Q, code_size] = [1, 2, 48, 9]`
 
-These are verified in `tests/fbbev/test_intermediate_tensors.py`.
+These are verified in `tests/perception/fbbev.py`.
 
 ## 2) Symbol dictionary (paper -> code tensors)
 
@@ -82,15 +82,15 @@ $$
 - `\hat{Y}`: class and box predictions
 
 ### Code mapping
-- `FBBEVLite.forward` in `pytorch_implementation/fbbev/model.py`
-- `FBBEVDepthNetLite.forward` in `pytorch_implementation/fbbev/depth_net.py`
-- `ForwardProjectionLite.forward` in `pytorch_implementation/fbbev/forward_projection.py`
-- `BackwardProjectionLite.forward` in `pytorch_implementation/fbbev/backward_projection.py`
-- `TemporalFusionLite.forward` in `pytorch_implementation/fbbev/temporal_fusion.py`
-- `FBBEVDetectionHeadLite.forward` in `pytorch_implementation/fbbev/detection_head.py`
+- `FBBEVLite.forward` in `pytorch_implementation/perception/fbbev/model.py`
+- `FBBEVDepthNetLite.forward` in `pytorch_implementation/perception/fbbev/depth_net.py`
+- `ForwardProjectionLite.forward` in `pytorch_implementation/perception/fbbev/forward_projection.py`
+- `BackwardProjectionLite.forward` in `pytorch_implementation/perception/fbbev/backward_projection.py`
+- `TemporalFusionLite.forward` in `pytorch_implementation/perception/fbbev/temporal_fusion.py`
+- `FBBEVDetectionHeadLite.forward` in `pytorch_implementation/perception/fbbev/detection_head.py`
 
 ### One sanity check
-`tests/fbbev/test_intermediate_tensors.py` checks final output shapes for the debug config.
+`tests/perception/fbbev.py` checks final output shapes for the debug config.
 
 ---
 
@@ -120,8 +120,8 @@ $$
 - `\odot`: element-wise depth weighting
 
 ### Code mapping
-- `FBBEVDepthNetLite` (`context_proj`, `depth_logits`) in `pytorch_implementation/fbbev/depth_net.py`
-- `ForwardProjectionLite.forward` in `pytorch_implementation/fbbev/forward_projection.py`
+- `FBBEVDepthNetLite` (`context_proj`, `depth_logits`) in `pytorch_implementation/perception/fbbev/depth_net.py`
+- `ForwardProjectionLite.forward` in `pytorch_implementation/perception/fbbev/forward_projection.py`
 
 ### Tensor shape notes
 - `context`: `[B, Ncam, C, Hf, Wf]`
@@ -159,8 +159,8 @@ $$
 - `d_{prior}`: reduced depth confidence map
 
 ### Code mapping
-- `DepthAwareAttentionLite.forward` in `pytorch_implementation/fbbev/depth_aware_attention.py`
-- `BackwardProjectionLite.forward` in `pytorch_implementation/fbbev/backward_projection.py`
+- `DepthAwareAttentionLite.forward` in `pytorch_implementation/perception/fbbev/depth_aware_attention.py`
+- `BackwardProjectionLite.forward` in `pytorch_implementation/perception/fbbev/backward_projection.py`
 
 ### Tensor shape notes
 - `bev_2d`: `[B, C, Hbev, Wbev]`
@@ -199,7 +199,7 @@ $$
 - `\phi`: small conv fusion network
 
 ### Code mapping
-- `TemporalFusionLite._warp_single` and `TemporalFusionLite.forward` in `pytorch_implementation/fbbev/temporal_fusion.py`
+- `TemporalFusionLite._warp_single` and `TemporalFusionLite.forward` in `pytorch_implementation/perception/fbbev/temporal_fusion.py`
 
 ### Tensor shape notes
 - history queue: `[B, T, C, Hbev, Wbev]`
@@ -243,9 +243,9 @@ $$
 - `s_x, s_y`: metric scale from `pc_range`
 
 ### Code mapping
-- `FBBEVDetectionHeadLite._decode_reg_map` in `pytorch_implementation/fbbev/detection_head.py`
-- `FBBEVDetectionHeadLite._select_topk_queries` in `pytorch_implementation/fbbev/detection_head.py`
-- `FBBEVBoxCoderLite.decode` in `pytorch_implementation/fbbev/postprocess.py`
+- `FBBEVDetectionHeadLite._decode_reg_map` in `pytorch_implementation/perception/fbbev/detection_head.py`
+- `FBBEVDetectionHeadLite._select_topk_queries` in `pytorch_implementation/perception/fbbev/detection_head.py`
+- `FBBEVBoxCoderLite.decode` in `pytorch_implementation/perception/fbbev/postprocess.py`
 
 ### Tensor shape notes
 - `all_cls_scores`: `[1, B, Q, num_classes]`
@@ -328,11 +328,9 @@ flowchart LR
 7. Re-run the tensor trace in Section 4 while stepping through code.
 8. Answer study drills without looking at code, then verify.
 
-## 7) Known implementation simplifications in this repo
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- Forward projection uses simple bilinear interpolation to scatter into BEV volume instead of pillar-based scatter.
-- Temporal fusion queue depth is limited (typically 1 history frame) in the debug config.
-- Backward projection uses a lightweight attention mechanism instead of full transformer cross-attention.
-- Detection head uses dense conv prediction + top-k rather than learned query attention.
-
-These simplifications keep the FB-BEV concept flow explicit for study.
+- Behavioral parity is pinned to frozen FB-BEV anchors in `study/markdown/strict_parity_anchor_manifest.md`.
+- Forward and backward projection contracts keep geometry-aware depth lifting/sampling behavior in pure PyTorch.
+- Temporal fusion keeps sequence-start/reset and warp-update semantics with strict metadata validation.
+- Occupancy and detection decode contracts are preserved with framework/CUDA ops replaced by explicit tensor programs.

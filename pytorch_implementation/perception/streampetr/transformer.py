@@ -7,7 +7,7 @@ from torch import nn
 
 
 class StreamPETRTemporalDecoderLayerLite(nn.Module):
-    """Decoder layer: self-attn -> cross-attn(memory + temporal memory) -> FFN."""
+    """Decoder layer: temporal self-attn -> spatial cross-attn -> FFN."""
 
     def __init__(self, embed_dims: int, num_heads: int, ffn_dims: int, dropout: float) -> None:
         super().__init__()
@@ -36,33 +36,24 @@ class StreamPETRTemporalDecoderLayerLite(nn.Module):
         key_padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         q = query + query_pos
-        query2 = self.self_attn(q, q, query, need_weights=False)[0]
-        query = self.norm1(query + self.dropout(query2))
-
-        keys = memory
-        key_positions = key_pos
-        attn_key_padding_mask = key_padding_mask
+        temporal_key = query
+        temporal_pos = query_pos
         if temp_memory is not None and temp_memory.numel() > 0:
             if temp_pos is None:
                 temp_pos = torch.zeros_like(temp_memory)
-            keys = torch.cat([memory, temp_memory], dim=0)
-            key_positions = torch.cat([key_pos, temp_pos], dim=0)
-            if key_padding_mask is not None:
-                bs = key_padding_mask.shape[0]
-                temporal_valid = torch.zeros(
-                    (bs, temp_memory.shape[0]),
-                    dtype=key_padding_mask.dtype,
-                    device=key_padding_mask.device,
-                )
-                attn_key_padding_mask = torch.cat([key_padding_mask, temporal_valid], dim=1)
+            temporal_key = torch.cat([query, temp_memory], dim=0)
+            temporal_pos = torch.cat([query_pos, temp_pos], dim=0)
+        k = temporal_key + temporal_pos
+        query2 = self.self_attn(q, k, temporal_key, need_weights=False)[0]
+        query = self.norm1(query + self.dropout(query2))
 
         q = query + query_pos
-        k = keys + key_positions
+        k = memory + key_pos
         query2 = self.cross_attn(
             q,
             k,
-            keys,
-            key_padding_mask=attn_key_padding_mask,
+            memory,
+            key_padding_mask=key_padding_mask,
             need_weights=False,
         )[0]
         query = self.norm2(query + self.dropout(query2))

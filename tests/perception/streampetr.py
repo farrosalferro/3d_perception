@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import pytest
 
 torch = pytest.importorskip("torch")
 
-from pytorch_implementation.streampetr.config import debug_forward_config
-from pytorch_implementation.streampetr.model import StreamPETRLite
+from pytorch_implementation.perception.streampetr.config import debug_forward_config
+from pytorch_implementation.perception.streampetr.model import StreamPETRLite
 
 
 def _build_dummy_img_metas(
@@ -75,6 +76,42 @@ def _register_hook(module, name: str, capture: dict[str, list[Any]], handles: li
     handles.append(module.register_forward_hook(_hook))
 
 
+def _assert_decoded_topk_label_score_consistency(
+    cls_scores: torch.Tensor,
+    decoded_scores: torch.Tensor,
+    decoded_labels: torch.Tensor,
+    *,
+    max_num: int,
+    num_classes: int,
+) -> None:
+    flat_scores = cls_scores.sigmoid().reshape(-1)
+    topk = min(int(max_num), int(flat_scores.numel()))
+    topk_scores, topk_indices = flat_scores.topk(topk)
+    topk_labels = (topk_indices % num_classes).to(dtype=torch.long)
+
+    assert decoded_scores.ndim == 1
+    assert decoded_labels.ndim == 1
+    assert decoded_scores.shape[0] == decoded_labels.shape[0]
+    assert decoded_scores.shape[0] <= topk
+    if decoded_scores.numel() > 1:
+        assert torch.all(decoded_scores[:-1] >= decoded_scores[1:])
+    assert torch.all((decoded_scores >= 0.0) & (decoded_scores <= 1.0))
+    if decoded_labels.numel() > 0:
+        assert decoded_labels.dtype == torch.long
+        assert int(decoded_labels.min().item()) >= 0
+        assert int(decoded_labels.max().item()) < num_classes
+
+    remaining = [(float(score), int(label)) for score, label in zip(topk_scores.tolist(), topk_labels.tolist())]
+    for score, label in zip(decoded_scores.tolist(), decoded_labels.tolist()):
+        matched_idx = None
+        for idx, (candidate_score, candidate_label) in enumerate(remaining):
+            if candidate_label == int(label) and abs(candidate_score - float(score)) <= 1e-6:
+                matched_idx = idx
+                break
+        assert matched_idx is not None, "Decoded score/label pair is inconsistent with top-k logits."
+        remaining.pop(matched_idx)
+
+
 def _conv2d_out(size: int, kernel: int, stride: int, padding: int) -> int:
     return ((size + 2 * padding - kernel) // stride) + 1
 
@@ -138,6 +175,12 @@ def instrumented_debug_forward():
             "reference": model.head.memory_reference_point.clone(),
             "timestamp": model.head.memory_timestamp.clone(),
         }
+        outputs_reset = model(img2, img_metas, decode=False, prev_exists=torch.zeros(batch_size))
+        memory_after_reset = {
+            "embedding": model.head.memory_embedding.clone(),
+            "reference": model.head.memory_reference_point.clone(),
+            "timestamp": model.head.memory_timestamp.clone(),
+        }
 
     for handle in handles:
         handle.remove()
@@ -146,14 +189,20 @@ def instrumented_debug_forward():
     assert isinstance(outputs_second, dict)
     return {
         "cfg": cfg,
+        "model": model,
+        "img1": img1,
+        "img2": img2,
+        "img_metas": img_metas,
         "batch_size": batch_size,
         "height": height,
         "width": width,
         "capture": capture,
         "outputs_first": outputs_first,
         "outputs_second": outputs_second,
+        "outputs_reset": outputs_reset,
         "memory_after_first": memory_after_first,
         "memory_after_second": memory_after_second,
+        "memory_after_reset": memory_after_reset,
     }
 
 
@@ -201,6 +250,7 @@ def test_intermediate_shapes_match_debug_config(instrumented_debug_forward):
     outputs = data["outputs_second"]
     memory_after_first = data["memory_after_first"]
     memory_after_second = data["memory_after_second"]
+    memory_after_reset = data["memory_after_reset"]
     batch_size = data["batch_size"]
     height = data["height"]
     width = data["width"]
@@ -281,6 +331,86 @@ def test_intermediate_shapes_match_debug_config(instrumented_debug_forward):
     assert not torch.allclose(memory_after_first["embedding"], memory_after_second["embedding"])
     assert memory_after_second["reference"].min() >= 0.0
     assert memory_after_second["reference"].max() <= 1.0
+    topk = min(cfg.topk_proposals, cfg.memory_len, cfg.num_queries)
+    assert torch.allclose(
+        memory_after_second["timestamp"][:, :topk],
+        torch.zeros_like(memory_after_second["timestamp"][:, :topk]),
+    )
+    if cfg.memory_len > topk:
+        assert torch.all(memory_after_second["timestamp"][:, topk:] >= 1.0)
+    assert torch.allclose(memory_after_reset["timestamp"], torch.zeros_like(memory_after_reset["timestamp"]))
+    assert memory_after_reset["reference"].min() >= 0.0
+    assert memory_after_reset["reference"].max() <= 1.0
+    assert not torch.allclose(memory_after_second["embedding"], memory_after_reset["embedding"])
+
+
+def test_metadata_contract_validation_requires_scene_and_geometry_keys():
+    cfg = debug_forward_config(
+        num_queries=32,
+        decoder_layers=2,
+        depth_num=6,
+        memory_len=24,
+        topk_proposals=8,
+        num_propagated=6,
+    )
+    model = StreamPETRLite(cfg).eval()
+    batch_size = 1
+    height, width = 96, 160
+    img = torch.randn(batch_size, cfg.num_cams, 3, height, width)
+    img_metas = _build_dummy_img_metas(batch_size=batch_size, num_cams=cfg.num_cams, height=height, width=width)
+
+    with torch.no_grad():
+        outputs = model(img, img_metas, decode=False, prev_exists=torch.zeros(batch_size))
+    assert isinstance(outputs, dict)
+
+    missing_scene_token = copy.deepcopy(img_metas)
+    missing_scene_token[0].pop("scene_token")
+    with pytest.raises(KeyError, match="scene_token"):
+        model(img, missing_scene_token, decode=False)
+
+    with torch.no_grad():
+        explicit_prev_outputs = model(img, missing_scene_token, decode=False, prev_exists=torch.zeros(batch_size))
+    assert isinstance(explicit_prev_outputs, dict)
+
+    bad_lidar2img = copy.deepcopy(img_metas)
+    bad_lidar2img[0]["lidar2img"] = bad_lidar2img[0]["lidar2img"][:-1]
+    with pytest.raises(ValueError, match="lidar2img"):
+        model(img, bad_lidar2img, decode=False, prev_exists=torch.zeros(batch_size))
+
+
+def test_decode_contract_semantics_and_topk_consistency(instrumented_debug_forward):
+    data = instrumented_debug_forward
+    cfg = data["cfg"]
+    model = data["model"]
+
+    with torch.no_grad():
+        decoded_pack = model(data["img2"], data["img_metas"], decode=True, prev_exists=torch.ones(data["batch_size"]))
+
+    assert isinstance(decoded_pack, dict)
+    assert set(decoded_pack.keys()) == {"preds", "decoded"}
+    preds = decoded_pack["preds"]
+    decoded = decoded_pack["decoded"]
+    assert isinstance(preds, dict)
+    assert isinstance(decoded, list)
+    assert len(decoded) == data["batch_size"]
+
+    cls_last = preds["all_cls_scores"][-1]
+    for batch_idx, sample in enumerate(decoded):
+        assert set(sample.keys()) == {"bboxes", "scores", "labels"}
+        assert sample["bboxes"].ndim == 2
+        assert sample["bboxes"].shape[1] == 9
+        assert sample["scores"].ndim == 1
+        assert sample["labels"].ndim == 1
+        assert sample["scores"].shape == sample["labels"].shape
+        assert sample["scores"].shape[0] == sample["bboxes"].shape[0]
+        assert sample["labels"].dtype == torch.long
+        _assert_decoded_topk_label_score_consistency(
+            cls_last[batch_idx],
+            sample["scores"],
+            sample["labels"],
+            max_num=cfg.max_num,
+            num_classes=cfg.num_classes,
+        )
 
 
 def test_intermediate_and_final_tensors_are_finite(instrumented_debug_forward):
@@ -288,8 +418,10 @@ def test_intermediate_and_final_tensors_are_finite(instrumented_debug_forward):
     capture = data["capture"]
     outputs_first = data["outputs_first"]
     outputs_second = data["outputs_second"]
+    outputs_reset = data["outputs_reset"]
     memory_after_first = data["memory_after_first"]
     memory_after_second = data["memory_after_second"]
+    memory_after_reset = data["memory_after_reset"]
 
     for name, values in capture.items():
         assert values, f"No values captured for '{name}'."
@@ -299,7 +431,7 @@ def test_intermediate_and_final_tensors_are_finite(instrumented_debug_forward):
             for tensor in tensors:
                 assert torch.isfinite(tensor).all(), f"Non-finite values found in intermediate '{name}'."
 
-    for output_name, output_dict in (("first", outputs_first), ("second", outputs_second)):
+    for output_name, output_dict in (("first", outputs_first), ("second", outputs_second), ("reset", outputs_reset)):
         for name, value in output_dict.items():
             if value is None:
                 continue
@@ -308,7 +440,7 @@ def test_intermediate_and_final_tensors_are_finite(instrumented_debug_forward):
             for tensor in tensors:
                 assert torch.isfinite(tensor).all(), f"Non-finite values found in final output '{output_name}:{name}'."
 
-    for bank_name, bank in (("first", memory_after_first), ("second", memory_after_second)):
+    for bank_name, bank in (("first", memory_after_first), ("second", memory_after_second), ("reset", memory_after_reset)):
         for name, value in bank.items():
             tensors = list(_iter_tensors(value))
             assert tensors, f"No tensor found in memory bank '{bank_name}:{name}'."

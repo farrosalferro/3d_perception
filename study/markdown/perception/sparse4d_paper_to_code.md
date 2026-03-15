@@ -6,8 +6,8 @@ Primary references:
 - Paper: `papers/Sparse4D.pdf`
 - Paper (online mirror): [Sparse4D v2: Recurrent Temporal Fusion with Sparse Model (arXiv 2305.14018)](https://arxiv.org/pdf/2305.14018.pdf)
 - Reference code (online): [linxuewu/Sparse4D](https://github.com/linxuewu/Sparse4D)
-- Implementation: `pytorch_implementation/sparse4d/`
-- Intermediate tensor tests: `tests/sparse4d/test_intermediate_tensors.py`
+- Implementation: `pytorch_implementation/perception/sparse4d/`
+- Intermediate tensor tests: `tests/perception/sparse4d.py`
 
 ## 1) Canonical study setup (fixed debug run)
 
@@ -32,7 +32,7 @@ Expected model outputs:
 - `all_cls_scores`: `[L, B, Q, num_classes] = [2, 1, 48, 10]`
 - `all_bbox_preds`: `[L, B, Q, 11] = [2, 1, 48, 11]`
 
-These are verified in `tests/sparse4d/test_intermediate_tensors.py`.
+These are verified in `tests/perception/sparse4d.py`.
 
 ## 2) Symbol dictionary (paper -> code tensors)
 
@@ -70,11 +70,11 @@ $$
 $$
 
 ### Code mapping
-- `Sparse4DLite.forward` and `Sparse4DLite.extract_img_feat` in `pytorch_implementation/sparse4d/model.py`
-- `Sparse4DHeadLite.forward` in `pytorch_implementation/sparse4d/head.py`
+- `Sparse4DLite.forward` and `Sparse4DLite.extract_img_feat` in `pytorch_implementation/perception/sparse4d/model.py`
+- `Sparse4DHeadLite.forward` in `pytorch_implementation/perception/sparse4d/head.py`
 
 ### One sanity check
-`tests/sparse4d/test_intermediate_tensors.py` asserts final output shapes for the debug config.
+`tests/perception/sparse4d.py` asserts final output shapes for the debug config.
 
 ---
 
@@ -101,8 +101,8 @@ F_t^{(k)} \in \mathbb{R}^{B\times N_{cam}\times C\times H_k\times W_k}
 $$
 
 ### Code mapping
-- `BackboneNeck` in `pytorch_implementation/sparse4d/backbone_neck.py`
-- `extract_img_feat` in `pytorch_implementation/sparse4d/model.py`
+- `BackboneNeck` in `pytorch_implementation/perception/sparse4d/backbone_neck.py`
+- `extract_img_feat` in `pytorch_implementation/perception/sparse4d/model.py`
 
 ### One sanity check
 Tests validate `backbone.stage*` and `neck.output*` tensor shapes at each level.
@@ -129,9 +129,9 @@ E(A_t) = \mathrm{MLP}(A_t)
 $$
 
 ### Code mapping
-- `InstanceBankLite` in `pytorch_implementation/sparse4d/instance_bank.py`
-- `SparseBox3DEncoderLite` in `pytorch_implementation/sparse4d/blocks.py`
-- Assembly in `Sparse4DHeadLite.forward` (`pytorch_implementation/sparse4d/head.py`)
+- `InstanceBankLite` in `pytorch_implementation/perception/sparse4d/instance_bank.py`
+- `SparseBox3DEncoderLite` in `pytorch_implementation/perception/sparse4d/blocks.py`
+- Assembly in `Sparse4DHeadLite.forward` (`pytorch_implementation/perception/sparse4d/head.py`)
 
 ### One sanity check
 Tests assert shapes for `head.instance_bank` and `head.anchor_encoder`.
@@ -157,9 +157,9 @@ H_l = \mathrm{FFN}\Big(\mathrm{CrossAgg}(\mathrm{SelfAttn}(H_{l-1}, H_{l-1}, H_{
 $$
 
 ### Code mapping
-- `SparseDecoderLayerLite` in `pytorch_implementation/sparse4d/blocks.py`
-- `Sparse4DDecoderLite` loop in `pytorch_implementation/sparse4d/decoder.py`
-- `DeformableFeatureAggregationLite` as a pure-PyTorch image-context surrogate in `pytorch_implementation/sparse4d/blocks.py`
+- `SparseDecoderLayerLite` in `pytorch_implementation/perception/sparse4d/blocks.py`
+- `Sparse4DDecoderLite` loop in `pytorch_implementation/perception/sparse4d/decoder.py`
+- `DeformableFeatureAggregationLite` as a pure-PyTorch image-context surrogate in `pytorch_implementation/perception/sparse4d/blocks.py`
 
 ### One sanity check
 Tests verify `decoder.layer*`, `self_attn`, `cross_attn`, and `ffn` output shapes.
@@ -194,10 +194,10 @@ $$
 $$
 
 ### Code mapping
-- `SparseBox3DRefinementLite` in `pytorch_implementation/sparse4d/blocks.py`
-- Iterative updates in `Sparse4DDecoderLite.forward` (`pytorch_implementation/sparse4d/decoder.py`)
-- `SparseBox3DDecoderLite.decode` in `pytorch_implementation/sparse4d/decoder.py`
-- `Sparse4DHeadLite.get_bboxes` in `pytorch_implementation/sparse4d/head.py`
+- `SparseBox3DRefinementLite` in `pytorch_implementation/perception/sparse4d/blocks.py`
+- Iterative updates in `Sparse4DDecoderLite.forward` (`pytorch_implementation/perception/sparse4d/decoder.py`)
+- `SparseBox3DDecoderLite.decode` in `pytorch_implementation/perception/sparse4d/decoder.py`
+- `Sparse4DHeadLite.get_bboxes` in `pytorch_implementation/perception/sparse4d/head.py`
 
 ### One sanity check
 Tests assert head branch output shapes and finite values for all captured intermediates/final tensors.
@@ -271,11 +271,9 @@ flowchart LR
 7. Re-run the tensor trace in Section 4 while stepping through code.
 8. Answer study drills without looking at code, then verify.
 
-## 7) Known implementation simplifications in this repo
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- Deformable feature aggregation uses pure PyTorch `grid_sample` instead of custom CUDA operators.
-- No temporal recurrence in the instance bank for the debug config (single-frame mode).
-- Anchor initialization is from learned embeddings rather than data-driven proposals.
-- Multi-level feature projection uses simple linear layers.
-
-These simplifications keep the Sparse4D concept flow explicit for study.
+- Behavioral parity is pinned to frozen Sparse4D anchors in `study/markdown/strict_parity_anchor_manifest.md`.
+- Instance-bank temporal update/cache semantics and per-layer anchor refinement are preserved in strict mode.
+- Projection-aware feature sampling is implemented with pure PyTorch gather/matmul/grid sampling operators.
+- Decode keeps Sparse4D top-k ordering and box denormalization semantics.

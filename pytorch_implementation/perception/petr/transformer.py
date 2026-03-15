@@ -32,7 +32,9 @@ class PETRTransformerDecoderLayerLite(nn.Module):
         query_pos: torch.Tensor,
         key_pos: torch.Tensor,
         key_padding_mask: torch.Tensor | None = None,
+        **kwargs: object,
     ) -> torch.Tensor:
+        del kwargs
         q = query + query_pos
         query2 = self.self_attn(q, q, query, need_weights=False)[0]
         query = self.norm1(query + self.dropout(query2))
@@ -83,7 +85,9 @@ class PETRTransformerDecoderLite(nn.Module):
         query_pos: torch.Tensor,
         key_pos: torch.Tensor,
         key_padding_mask: torch.Tensor | None = None,
+        reg_branch: nn.ModuleList | None = None,
     ) -> torch.Tensor:
+        del reg_branch
         if not self.return_intermediate:
             for layer in self.layers:
                 query = layer(
@@ -122,6 +126,7 @@ class PETRTransformerLite(nn.Module):
         mask: torch.Tensor,
         query_embed: torch.Tensor,
         pos_embed: torch.Tensor,
+        reg_branch: nn.ModuleList | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
@@ -130,7 +135,7 @@ class PETRTransformerLite(nn.Module):
             query_embed: [Q, C]
             pos_embed: [B, Ncam, C, H, W]
         Returns:
-            outs_dec: [L, Q, B, C]
+            outs_dec: [L, B, Q, C]
             memory: [B, Ncam, C, H, W]
         """
 
@@ -147,7 +152,9 @@ class PETRTransformerLite(nn.Module):
             query_pos=query_pos,
             key_pos=key_pos,
             key_padding_mask=key_padding_mask,
+            reg_branch=reg_branch,
         )
+        outs_dec = outs_dec.transpose(1, 2)
         memory = memory.reshape(num_cams, height, width, bs, channels).permute(3, 0, 4, 1, 2)
         return outs_dec, memory
 

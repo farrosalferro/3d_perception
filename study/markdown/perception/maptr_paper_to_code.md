@@ -5,8 +5,8 @@ This note maps MapTR paper symbols and concepts to the pure-PyTorch forward impl
 Primary references:
 - Paper: `papers/MapTR.pdf`
 - Reference code: `repos/MapTR/`
-- Implementation: `pytorch_implementation/maptr/`
-- Intermediate tensor tests: `tests/maptr/test_intermediate_tensors.py`
+- Implementation: `pytorch_implementation/perception/maptr/`
+- Intermediate tensor tests: `tests/perception/maptr.py`
 
 ## 1) Canonical study setup (fixed debug run)
 
@@ -35,7 +35,7 @@ Expected model outputs:
 - `all_bbox_preds`: `[L, B, V, 4]` (normalized `cx, cy, w, h`)
 - `all_pts_preds`: `[L, B, V, P, 2]` (normalized points)
 
-These are verified in `tests/maptr/test_intermediate_tensors.py`.
+These are verified in `tests/perception/maptr.py`.
 
 ## 2) Symbol dictionary (paper -> code tensors)
 
@@ -85,12 +85,12 @@ $$
 - `\hat{Y}`: class, box, and point predictions across decoder layers
 
 ### Code mapping
-- `MapTRLite.forward` in `pytorch_implementation/maptr/model.py`
-- `MapTRHeadLite.forward` in `pytorch_implementation/maptr/head.py`
-- `MapTRPerceptionTransformerLite.forward` in `pytorch_implementation/maptr/transformer.py`
+- `MapTRLite.forward` in `pytorch_implementation/perception/maptr/model.py`
+- `MapTRHeadLite.forward` in `pytorch_implementation/perception/maptr/head.py`
+- `MapTRPerceptionTransformerLite.forward` in `pytorch_implementation/perception/maptr/transformer.py`
 
 ### One sanity check
-`tests/maptr/test_intermediate_tensors.py` asserts all final output shapes in the debug setup.
+`tests/perception/maptr.py` asserts all final output shapes in the debug setup.
 
 ---
 
@@ -122,7 +122,7 @@ $$
 - `N_pts`: number of points per vector
 
 ### Code mapping
-- `instance_embedding`, `pts_embedding` and `_build_query_embedding` in `pytorch_implementation/maptr/head.py`
+- `instance_embedding`, `pts_embedding` and `_build_query_embedding` in `pytorch_implementation/perception/maptr/head.py`
 
 ### Tensor shape notes
 - `instance_embedding.weight`: `[N_vec, C]`
@@ -161,7 +161,7 @@ $$
 - `B`: BEV memory tokens after cross-attention and FFN
 
 ### Code mapping
-- `MapTRBEVEncoderLite` in `pytorch_implementation/maptr/transformer.py`
+- `MapTRBEVEncoderLite` in `pytorch_implementation/perception/maptr/transformer.py`
 - BEV query table in `MapTRHeadLite.bev_embedding`
 
 ### Tensor shape notes
@@ -209,9 +209,9 @@ $$
 - `\hat{b}_l`: per-vector box representation from predicted points
 
 ### Code mapping
-- Decoder layers in `pytorch_implementation/maptr/transformer.py`
-- Branch logic in `MapTRHeadLite.forward` (`pytorch_implementation/maptr/head.py`)
-- Point-to-box helper in `pytorch_implementation/maptr/utils.py`
+- Decoder layers in `pytorch_implementation/perception/maptr/transformer.py`
+- Branch logic in `MapTRHeadLite.forward` (`pytorch_implementation/perception/maptr/head.py`)
+- Point-to-box helper in `pytorch_implementation/perception/maptr/utils.py`
 
 ### Tensor shape notes
 - Decoder hidden per layer: `[Q, B, C]`
@@ -251,8 +251,8 @@ $$
 - `(x_n, y_n)`: normalized point or box center coordinate
 
 ### Code mapping
-- `MapTRNMSFreeCoderLite` in `pytorch_implementation/maptr/postprocess.py`
-- Geometry helpers in `pytorch_implementation/maptr/utils.py`
+- `MapTRNMSFreeCoderLite` in `pytorch_implementation/perception/maptr/postprocess.py`
+- Geometry helpers in `pytorch_implementation/perception/maptr/utils.py`
 
 ### One sanity check
 Finite checks in the test file ensure decoded inputs (`all_cls_scores`, `all_bbox_preds`, `all_pts_preds`) are numerically stable.
@@ -329,11 +329,9 @@ flowchart LR
 7. Re-run the end-to-end trace in Section 4 while stepping through code.
 8. Answer study drills without looking at code, then verify.
 
-## 7) Known implementation simplifications in this repo
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- Single FPN level only (no multi-scale BEV encoder).
-- Uses simplified deformable attention with `grid_sample` instead of custom CUDA ops.
-- No point-to-point permutation-equivalent matching loss — focuses on forward-path mechanics.
-- Map class count is reduced to 3 in the debug config for quick iteration.
-
-These simplifications keep the MapTR concept flow explicit for study.
+- Behavioral parity is pinned to frozen MapTR anchor files in `study/markdown/strict_parity_anchor_manifest.md`.
+- Hierarchical instance-point queries and decoder-layer reference refinement are preserved from upstream behavior.
+- Deformable/custom operators are replaced with explicit PyTorch `grid_sample`-based attention while keeping decode contracts unchanged.
+- Postprocess follows map polyline decode ordering (`top-k`, class mapping, point-set decode, center-range filtering).

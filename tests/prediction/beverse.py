@@ -13,8 +13,31 @@ from pytorch_implementation.prediction.beverse.metrics import compute_ade_fde, s
 from pytorch_implementation.prediction.beverse.model import BEVerseLite
 
 
-def _build_dummy_img_metas(batch_size: int) -> list[dict[str, Any]]:
-    return [{"sample_idx": f"sample_{batch_idx}"} for batch_idx in range(batch_size)]
+def _build_dummy_img_metas(
+    batch_size: int,
+    *,
+    seq_len: int = 1,
+    include_time_indices: bool = False,
+    include_future_time_stamps: bool = False,
+    pred_horizon: int | None = None,
+    future_dt: float = 0.5,
+) -> list[dict[str, Any]]:
+    metas: list[dict[str, Any]] = []
+    for batch_idx in range(batch_size):
+        meta: dict[str, Any] = {"sample_idx": f"sample_{batch_idx}"}
+        if include_time_indices:
+            start = 100 * (batch_idx + 1)
+            frame_indices = list(range(start, start + seq_len))
+            meta["frame_indices"] = frame_indices
+            meta["timestamp_indices"] = [float(idx) * future_dt for idx in frame_indices]
+        if include_future_time_stamps:
+            if pred_horizon is None:
+                raise ValueError("pred_horizon must be provided when include_future_time_stamps=True.")
+            meta["future_time_stamps"] = [
+                float(step + 1) * future_dt for step in range(int(pred_horizon))
+            ]
+        metas.append(meta)
+    return metas
 
 
 def _first_tensor(value: Any) -> torch.Tensor | None:
@@ -249,6 +272,139 @@ def test_prediction_horizon_and_time_axis_integrity(instrumented_debug_forward):
     assert torch.allclose(actual_step, expected_step)
     assert time_stamps[0].item() == pytest.approx(cfg.future_dt)
     assert time_stamps[-1].item() == pytest.approx(cfg.pred_horizon * cfg.future_dt)
+
+
+def test_metadata_and_future_time_index_contracts_are_strict():
+    cfg = debug_forward_config(pred_horizon=6)
+    model = BEVerseLite(cfg).eval()
+
+    batch_size = 1
+    seq_len = 3
+    img = torch.randn(batch_size, seq_len, cfg.num_cams, 3, 64, 96)
+    valid_meta = _build_dummy_img_metas(
+        batch_size=batch_size,
+        seq_len=seq_len,
+        include_time_indices=True,
+        include_future_time_stamps=True,
+        pred_horizon=cfg.pred_horizon,
+        future_dt=cfg.future_dt,
+    )
+
+    with torch.no_grad():
+        outputs = model(img, valid_meta, decode=False)
+
+    expected_time_stamps = torch.as_tensor(
+        valid_meta[0]["future_time_stamps"],
+        device=outputs["time_stamps"].device,
+        dtype=outputs["time_stamps"].dtype,
+    )
+    assert torch.allclose(outputs["time_stamps"], expected_time_stamps)
+    assert bool(torch.all(outputs["time_stamps"][1:] > outputs["time_stamps"][:-1]))
+
+    invalid_meta = _build_dummy_img_metas(
+        batch_size=batch_size,
+        seq_len=seq_len,
+        include_time_indices=True,
+    )
+    invalid_meta[0]["frame_indices"] = [10, 12, 11]
+    with pytest.raises(ValueError, match="strictly increasing"):
+        model(img, invalid_meta, decode=False)
+
+    invalid_future_meta = _build_dummy_img_metas(
+        batch_size=batch_size,
+        seq_len=seq_len,
+        include_time_indices=True,
+        include_future_time_stamps=True,
+        pred_horizon=cfg.pred_horizon,
+        future_dt=cfg.future_dt,
+    )
+    invalid_future_meta[0]["future_time_stamps"][2] = invalid_future_meta[0]["future_time_stamps"][1] - 0.1
+    with pytest.raises(ValueError, match="strictly increasing"):
+        model(img, invalid_future_meta, decode=False)
+
+
+def test_decode_parity_mode_score_and_topk_semantics(instrumented_debug_forward):
+    cfg = instrumented_debug_forward["cfg"]
+    outputs = instrumented_debug_forward["outputs"]
+    decoded_payload = instrumented_debug_forward["decoded"]["decoded"]
+    batch_size = outputs["mode_probs"].shape[0]
+    topk = min(cfg.decode_topk, cfg.num_modes)
+
+    expected_keys = {
+        "best_mode_idx",
+        "best_mode_prob",
+        "best_trajectory",
+        "topk_mode_idx",
+        "topk_mode_prob",
+        "topk_trajectory",
+    }
+    assert set(decoded_payload.keys()) == expected_keys
+    assert decoded_payload["topk_mode_idx"].shape == (batch_size, topk)
+    assert decoded_payload["topk_mode_prob"].shape == (batch_size, topk)
+    assert decoded_payload["topk_trajectory"].shape == (batch_size, topk, cfg.pred_horizon, 2)
+
+    expected_topk_prob, expected_topk_idx = torch.topk(outputs["mode_probs"], k=topk, dim=-1)
+    assert torch.equal(decoded_payload["topk_mode_idx"], expected_topk_idx)
+    assert torch.allclose(decoded_payload["topk_mode_prob"], expected_topk_prob, atol=1e-6, rtol=1e-6)
+
+    gather_topk = expected_topk_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, cfg.pred_horizon, 2)
+    expected_topk_trajectory = outputs["trajectory_preds"].gather(dim=1, index=gather_topk)
+    assert torch.allclose(
+        decoded_payload["topk_trajectory"],
+        expected_topk_trajectory,
+        atol=1e-6,
+        rtol=1e-6,
+    )
+    assert torch.equal(decoded_payload["best_mode_idx"], expected_topk_idx[:, 0])
+    assert torch.allclose(decoded_payload["best_mode_prob"], expected_topk_prob[:, 0], atol=1e-6, rtol=1e-6)
+    assert torch.allclose(
+        decoded_payload["best_trajectory"],
+        expected_topk_trajectory[:, 0],
+        atol=1e-6,
+        rtol=1e-6,
+    )
+    assert torch.equal(decoded_payload["best_mode_idx"], outputs["mode_probs"].argmax(dim=-1))
+
+
+def test_temporal_validity_mask_parity_and_update_behavior():
+    cfg = debug_forward_config(pred_horizon=6)
+    model = BEVerseLite(cfg).eval()
+
+    batch_size = 1
+    seq_len = 3
+    img = torch.zeros(batch_size, seq_len, cfg.num_cams, 3, 64, 96)
+    img[:, 0] = -3.0
+    img[:, 1] = 5.0
+    img[:, 2] = 0.25
+
+    base_metas = _build_dummy_img_metas(
+        batch_size=batch_size,
+        seq_len=seq_len,
+        include_time_indices=True,
+    )
+    img_is_valid = torch.tensor([[True, False, True]], dtype=torch.bool)
+    metas_with_validity = [dict(base_metas[0], img_is_valid=img_is_valid[0].tolist())]
+
+    with torch.no_grad():
+        outputs_from_meta = model(img, metas_with_validity, decode=False)
+        outputs_from_tensor = model(img, base_metas, img_is_valid=img_is_valid, decode=False)
+        outputs_all_valid = model(img, base_metas, img_is_valid=torch.ones_like(img_is_valid), decode=False)
+
+    assert torch.allclose(
+        outputs_from_meta["temporal_tokens"],
+        outputs_from_tensor["temporal_tokens"],
+        atol=1e-6,
+        rtol=1e-6,
+    )
+    assert torch.allclose(
+        outputs_from_meta["trajectory_preds"],
+        outputs_from_tensor["trajectory_preds"],
+        atol=1e-6,
+        rtol=1e-6,
+    )
+
+    temporal_delta = (outputs_from_tensor["temporal_tokens"] - outputs_all_valid["temporal_tokens"]).abs().max()
+    assert float(temporal_delta) > 1e-6
 
 
 def test_trajectory_consistency_matches_cumsum_deltas(instrumented_debug_forward):

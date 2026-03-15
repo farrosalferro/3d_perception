@@ -5,8 +5,8 @@ This note maps StreamPETR paper symbols/equations to the pure-PyTorch forward im
 Primary references:
 - Paper: [arXiv:2303.11926](https://arxiv.org/abs/2303.11926) (local `papers/StreamPETR.pdf` not present in this worktree)
 - Reference code: [exiawsh/StreamPETR](https://github.com/exiawsh/StreamPETR)
-- Implementation: `pytorch_implementation/streampetr/`
-- Intermediate tensor tests: `tests/streampetr/test_intermediate_tensors.py`
+- Implementation: `pytorch_implementation/perception/streampetr/`
+- Intermediate tensor tests: `tests/perception/streampetr.py`
 
 ## 1) Canonical study setup (fixed debug run)
 
@@ -36,7 +36,7 @@ Expected model outputs:
 - `all_cls_scores`: `[L, B, Q, num_classes] = [2, 1, 48, 10]`
 - `all_bbox_preds`: `[L, B, Q, code_size] = [2, 1, 48, 10]`
 
-These are verified in `tests/streampetr/test_intermediate_tensors.py`.
+These are verified in `tests/perception/streampetr.py`.
 
 ## 2) Symbol dictionary (paper -> code tensors)
 
@@ -78,9 +78,9 @@ M_t = \mathrm{UpdateMemory}(M_{t-1}, \hat{Y}_t, H_t)
 $$
 
 ### Code mapping
-- `StreamPETRLite.forward` in `pytorch_implementation/streampetr/model.py`
-- `StreamPETRHeadLite.forward` in `pytorch_implementation/streampetr/head.py`
-- `StreamPETRHeadLite.post_update_memory` in `pytorch_implementation/streampetr/head.py`
+- `StreamPETRLite.forward` in `pytorch_implementation/perception/streampetr/model.py`
+- `StreamPETRHeadLite.forward` in `pytorch_implementation/perception/streampetr/head.py`
+- `StreamPETRHeadLite.post_update_memory` in `pytorch_implementation/perception/streampetr/head.py`
 
 ### One sanity check
 The test runs two sequential frames and checks memory tensors change between frame 1 and frame 2.
@@ -110,11 +110,11 @@ F_t \in \mathbb{R}^{B\times N_{cam}\times C\times H_f\times W_f}
 $$
 
 ### Code mapping
-- `StreamPETRLite.extract_img_feat` in `pytorch_implementation/streampetr/model.py`
-- `BackboneNeck` in `pytorch_implementation/streampetr/backbone_neck.py`
+- `StreamPETRLite.extract_img_feat` in `pytorch_implementation/perception/streampetr/model.py`
+- `BackboneNeck` in `pytorch_implementation/perception/streampetr/backbone_neck.py`
 
 ### One sanity check
-`tests/streampetr/test_intermediate_tensors.py` validates backbone/FPN intermediate shapes.
+`tests/perception/streampetr.py` validates backbone/FPN intermediate shapes.
 
 ---
 
@@ -143,9 +143,9 @@ $$
 $$
 
 ### Code mapping
-- `StreamPETRHeadLite.position_embeding` in `pytorch_implementation/streampetr/head.py`
-- `inverse_sigmoid` in `pytorch_implementation/streampetr/utils.py`
-- `position_encoder` and `adapt_pos3d` in `pytorch_implementation/streampetr/head.py`
+- `StreamPETRHeadLite.position_embeding` in `pytorch_implementation/perception/streampetr/head.py`
+- `inverse_sigmoid` in `pytorch_implementation/perception/streampetr/utils.py`
+- `position_encoder` and `adapt_pos3d` in `pytorch_implementation/perception/streampetr/head.py`
 
 ### One sanity check
 Tests assert `head.position_encoder` and `head.adapt_pos3d` produce `[B*Ncam, C, Hf, Wf]`.
@@ -171,9 +171,9 @@ P_t^{temp} = f_{q}(\mathrm{PE}_{3d}(R)) + f_{time}(\mathrm{PE}_{1d}(\tau))
 $$
 
 ### Code mapping
-- `StreamPETRHeadLite.temporal_alignment` in `pytorch_implementation/streampetr/head.py`
-- `query_embedding`, `time_embedding` in `pytorch_implementation/streampetr/head.py`
-- `pos2posemb3d`, `pos2posemb1d` in `pytorch_implementation/streampetr/utils.py`
+- `StreamPETRHeadLite.temporal_alignment` in `pytorch_implementation/perception/streampetr/head.py`
+- `query_embedding`, `time_embedding` in `pytorch_implementation/perception/streampetr/head.py`
+- `pos2posemb3d`, `pos2posemb1d` in `pytorch_implementation/perception/streampetr/utils.py`
 
 ### Tensor shape notes
 - Decoder query count is `Q_total = Q + num_propagated` in this implementation.
@@ -209,8 +209,8 @@ H_l^t = \mathrm{FFN}(\mathrm{CrossAttn}(\mathrm{SelfAttn}(H_{l-1}^t, Q_t^{aug}),
 $$
 
 ### Code mapping
-- `StreamPETRTemporalTransformerLite.forward` in `pytorch_implementation/streampetr/transformer.py`
-- `StreamPETRTemporalDecoderLayerLite.forward` in `pytorch_implementation/streampetr/transformer.py`
+- `StreamPETRTemporalTransformerLite.forward` in `pytorch_implementation/perception/streampetr/transformer.py`
+- `StreamPETRTemporalDecoderLayerLite.forward` in `pytorch_implementation/perception/streampetr/transformer.py`
 
 ### One sanity check
 Tests verify each decoder layer/self-attn/cross-attn/ffn output shape is `[Q_total, B, C]`.
@@ -333,13 +333,9 @@ flowchart LR
 8. Re-run the tensor trace in Section 4 while stepping through code.
 9. Answer study drills without looking at code, then verify.
 
-## 7) Known implementation simplifications in this repo
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- Uses standard `nn.MultiheadAttention` instead of deformable attention.
-- Single FPN level only (no multi-scale features).
-- Memory bank uses simple FIFO update rather than learned gating.
-- Ego-motion alignment for memory reference points uses a simplified transform.
-- No data augmentation transforms in the geometry pipeline.
-
-These simplifications keep the StreamPETR concept flow explicit for study.
-
+- Behavioral parity is pinned to frozen StreamPETR anchors in `study/markdown/strict_parity_anchor_manifest.md`.
+- Memory-bank proposal propagation and temporal query alignment semantics are preserved for streaming updates.
+- Temporal decoder attention ordering (query + memory self-attention, then spatial cross-attention) follows upstream behavior contracts.
+- Decode preserves NMS-free top-k ordering and post-center filtering in pure PyTorch.

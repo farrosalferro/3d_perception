@@ -5,8 +5,8 @@ This note maps PolarFormer symbols/equations to the pure-PyTorch forward impleme
 Primary references:
 - Paper: `papers/PolarFormer.pdf`
 - Reference repo lineage: `repos/PolarFormer/`
-- Implementation: `pytorch_implementation/polarformer/`
-- Intermediate tensor tests: `tests/polarformer/test_intermediate_tensors.py`
+- Implementation: `pytorch_implementation/perception/polarformer/`
+- Intermediate tensor tests: `tests/perception/polarformer.py`
 
 ## 1) Canonical study setup (fixed debug run)
 
@@ -36,7 +36,7 @@ Expected model outputs:
 - `all_cls_scores`: `[L, B, Q, num_classes] = [2, 1, 48, 10]`
 - `all_bbox_preds`: `[L, B, Q, code_size] = [2, 1, 48, 10]`
 
-These are verified in `tests/polarformer/test_intermediate_tensors.py`.
+These are verified in `tests/perception/polarformer.py`.
 
 ## 2) Symbol dictionary (paper -> code tensors)
 
@@ -78,12 +78,12 @@ H = \mathrm{Decoder}(Q, F_t), \quad \hat{Y} = \{(\hat{c}_l, \hat{b}_l)\}_{l=1}^{
 $$
 
 ### Code mapping
-- `PolarFormerLite.forward` in `pytorch_implementation/polarformer/model.py`
-- `BackboneNeck.forward` in `pytorch_implementation/polarformer/backbone_neck.py`
-- `PolarFormerHeadLite.forward` in `pytorch_implementation/polarformer/head.py`
+- `PolarFormerLite.forward` in `pytorch_implementation/perception/polarformer/model.py`
+- `BackboneNeck.forward` in `pytorch_implementation/perception/polarformer/backbone_neck.py`
+- `PolarFormerHeadLite.forward` in `pytorch_implementation/perception/polarformer/head.py`
 
 ### One sanity check
-`tests/polarformer/test_intermediate_tensors.py` asserts final output tensor shapes.
+`tests/perception/polarformer.py` asserts final output tensor shapes.
 
 ---
 
@@ -115,7 +115,7 @@ R = \frac{1}{N_{cam}}\sum_{i=1}^{N_{cam}} R_i
 $$
 
 ### Code mapping
-- `PolarRayCrossAttentionLite.forward` in `pytorch_implementation/polarformer/backbone_neck.py`
+- `PolarRayCrossAttentionLite.forward` in `pytorch_implementation/perception/polarformer/backbone_neck.py`
 - camera loop in `BackboneNeck.forward`
 
 ### Tensor shape notes
@@ -155,8 +155,8 @@ r_q = \sigma(W_r q_{pos})
 $$
 
 ### Code mapping
-- `PolarTransformerLite.forward` in `pytorch_implementation/polarformer/transformer.py`
-- `PolarTransformerDecoderLayerLite` in `pytorch_implementation/polarformer/transformer.py`
+- `PolarTransformerLite.forward` in `pytorch_implementation/perception/polarformer/transformer.py`
+- `PolarTransformerDecoderLayerLite` in `pytorch_implementation/perception/polarformer/transformer.py`
 
 ### Tensor shape notes
 - Decoder hidden per layer: `[Q, B, C]`
@@ -199,7 +199,7 @@ $$
 
 ### Code mapping
 - regression update + conversion in `PolarFormerHeadLite.forward`
-- decode in `NMSFreeCoderLite.decode` (`pytorch_implementation/polarformer/postprocess.py`)
+- decode in `NMSFreeCoderLite.decode` (`pytorch_implementation/perception/polarformer/postprocess.py`)
 
 ### Tensor shape notes
 - `all_cls_scores`: `[L, B, Q, num_classes]`
@@ -279,12 +279,9 @@ flowchart LR
 6. Re-run the tensor trace in Section 4 while stepping through code.
 7. Answer study drills without looking at code, then verify.
 
-## 7) Known implementation simplifications in this repo
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- Polar cross-attention uses `grid_sample` rather than custom polar CUDA kernels.
-- Azimuth and radius bin counts are configurable but kept small in the debug config.
-- No multi-frame temporal fusion — each frame is processed independently.
-- Uses standard `nn.MultiheadAttention` in the decoder instead of deformable attention.
-
-These simplifications keep the PolarFormer concept flow explicit for study.
-
+- Behavioral parity is pinned to frozen PolarFormer anchors in `study/markdown/strict_parity_anchor_manifest.md`.
+- Polar geometry flow (ray bins, camera transforms, reference updates) is kept with strict metadata and shape validation.
+- Polar attention kernels are implemented with pure PyTorch sampling/interpolation to match behavior-level contracts.
+- Decode retains NMS-free ordering and metric-space denormalization semantics.

@@ -4,8 +4,8 @@ This note explains BEVFormer by binding paper concepts to your pure-PyTorch impl
 
 Primary references:
 - Paper: `BEVFormer.pdf`
-- Implementation: `pure_torch_bevformer/`
-- Shape verification: `tests/bevformer.py`
+- Implementation: `pytorch_implementation/perception/bevformer/`
+- Shape verification: `tests/perception/bevformer.py`
 
 ## 1) Canonical study setup (fixed dummy run)
 
@@ -35,7 +35,7 @@ Expected outputs:
 - `all_bbox_preds`: `[num_dec, B, Q, 10] = [2, 1, 48, 10]`
 
 These shapes are validated in:
-- `tests/bevformer.py`
+- `tests/perception/bevformer.py`
 
 ## 2) Symbol dictionary (paper -> code tensors)
 
@@ -90,9 +90,9 @@ $$
 - `\hat{Y}_t`: final head outputs (`all_cls_scores`, `all_bbox_preds`)
 
 ### Code mapping
-- `BEVFormerLite.forward` in `pure_torch_bevformer/model.py`
-- `BEVFormerHeadLite.forward` in `pure_torch_bevformer/head.py`
-- `BEVFormerEncoderLite` and `BEVFormerLayerLite` in `pure_torch_bevformer/modules/encoder.py`
+- `BEVFormerLite.forward` in `pytorch_implementation/perception/bevformer/model.py`
+- `BEVFormerHeadLite.forward` in `pytorch_implementation/perception/bevformer/head.py`
+- `BEVFormerEncoderLite` and `BEVFormerLayerLite` in `pytorch_implementation/perception/bevformer/modules/encoder.py`
 
 ### Key code snippet
 ```python
@@ -149,8 +149,8 @@ $$
 - `C`: feature channels
 
 ### Code mapping
-- `extract_img_feat` in `pure_torch_bevformer/model.py`
-- `BackboneNeck` in `pure_torch_bevformer/backbone_neck.py`
+- `extract_img_feat` in `pytorch_implementation/perception/bevformer/model.py`
+- `BackboneNeck` in `pytorch_implementation/perception/bevformer/backbone_neck.py`
 
 ### Key code snippet
 ```python
@@ -215,9 +215,9 @@ $$
 - `HW`: number of BEV cells (`bev_h * bev_w`)
 
 ### Code mapping
-- `BEVFormerHeadLite.forward` in `pure_torch_bevformer/head.py`
-- `LearnedPositionalEncoding2D` in `pure_torch_bevformer/utils/positional_encoding.py`
-- `PerceptionTransformerLite.get_bev_features` in `pure_torch_bevformer/modules/transformer.py`
+- `BEVFormerHeadLite.forward` in `pytorch_implementation/perception/bevformer/head.py`
+- `LearnedPositionalEncoding2D` in `pytorch_implementation/perception/bevformer/utils/positional_encoding.py`
+- `PerceptionTransformerLite.get_bev_features` in `pytorch_implementation/perception/bevformer/modules/transformer.py`
 
 ### Key code snippet
 ```python
@@ -296,9 +296,9 @@ $$
 
 ### Code mapping
 - `get_reference_points_3d`, `get_reference_points_2d`, `point_sampling`
-  in `pure_torch_bevformer/utils/geometry.py`
+  in `pytorch_implementation/perception/bevformer/utils/geometry.py`
 - Called in encoder forward:
-  `pure_torch_bevformer/modules/encoder.py`
+  `pytorch_implementation/perception/bevformer/modules/encoder.py`
 
 ### Key code snippet
 ```python
@@ -364,11 +364,11 @@ where `r` is `reference_points` and `\Delta p` are learned offsets.
 
 ### Code mapping
 - `TemporalSelfAttentionLite` in
-  `pure_torch_bevformer/modules/temporal_self_attention.py`
+  `pytorch_implementation/perception/bevformer/modules/temporal_self_attention.py`
 - `hybrid_ref_2d` and `prev_bev` construction in
-  `pure_torch_bevformer/modules/encoder.py`
+  `pytorch_implementation/perception/bevformer/modules/encoder.py`
 - Shift computation from CAN bus in
-  `pure_torch_bevformer/modules/transformer.py`
+  `pytorch_implementation/perception/bevformer/modules/transformer.py`
 
 ### Key code snippet
 ```python
@@ -433,9 +433,9 @@ $$
 
 ### Code mapping
 - `SpatialCrossAttentionLite` in
-  `pure_torch_bevformer/modules/spatial_cross_attention.py`
+  `pytorch_implementation/perception/bevformer/modules/spatial_cross_attention.py`
 - `MSDeformableAttention3DLite` and `ms_deform_attn_torch` in
-  `pure_torch_bevformer/modules/deformable_attention.py`
+  `pytorch_implementation/perception/bevformer/modules/deformable_attention.py`
 
 ### Key code snippet
 ```python
@@ -511,7 +511,7 @@ $$
 
 ### Code mapping
 - `BEVFormerLayerLite.forward` and `BEVFormerEncoderLite.forward`
-  in `pure_torch_bevformer/modules/encoder.py`
+  in `pytorch_implementation/perception/bevformer/modules/encoder.py`
 
 ### Key code snippet
 ```python
@@ -581,10 +581,10 @@ $$
 
 ### Code mapping
 - `PerceptionTransformerLite.forward` in
-  `pure_torch_bevformer/modules/transformer.py`
+  `pytorch_implementation/perception/bevformer/modules/transformer.py`
 - `DetectionTransformerDecoderLite.forward` in
-  `pure_torch_bevformer/modules/decoder.py`
-- class/reg branches in `pure_torch_bevformer/head.py`
+  `pytorch_implementation/perception/bevformer/modules/decoder.py`
+- class/reg branches in `pytorch_implementation/perception/bevformer/head.py`
 
 ### Key code snippet
 ```python
@@ -653,10 +653,10 @@ $$
 - `label`: class ID after modulo operation
 
 ### Code mapping
-- Regression adjustment in `pure_torch_bevformer/head.py`
-  - uses `inverse_sigmoid` from `pure_torch_bevformer/utils/math.py`
-- Box decode utilities in `pure_torch_bevformer/utils/boxes.py`
-- Top-k and range filtering in `pure_torch_bevformer/postprocess/nms_free_coder.py`
+- Regression adjustment in `pytorch_implementation/perception/bevformer/head.py`
+  - uses `inverse_sigmoid` from `pytorch_implementation/perception/bevformer/utils/math.py`
+- Box decode utilities in `pytorch_implementation/perception/bevformer/utils/boxes.py`
+- Top-k and range filtering in `pytorch_implementation/perception/bevformer/postprocess/nms_free_coder.py`
 
 ### Key code snippet
 ```python
@@ -714,7 +714,7 @@ where `Decode` is NMS-free top-k + range filtering in this repo.
 - `\hat{Y}_t`: final predictions (`bboxes`, `scores`, `labels`)
 
 ### Code mapping
-- `BEVFormerLite.forward` in `pure_torch_bevformer/model.py`
+- `BEVFormerLite.forward` in `pytorch_implementation/perception/bevformer/model.py`
 
 ### Key code snippet
 ```python
@@ -736,7 +736,7 @@ decoded = outputs["decoded"]
 BEVFormer is an information routing system: BEV grid queries route attention to relevant spatiotemporal evidence, then object queries read the BEV world model for detection.
 
 ### One sanity check
-All major intermediate hooks in `tests/bevformer.py` should be present and finite.
+All major intermediate hooks in `tests/perception/bevformer.py` should be present and finite.
 
 ---
 
@@ -809,10 +809,9 @@ predTensors --> decode[NMSFreeCoderLite]
 4. Re-run the end-to-end trace in Section 4 while stepping through code.
 5. Answer study drills without looking at code, then verify.
 
-## 7) Known implementation simplifications in this repo
+## 7) Strict parity notes and pure-PyTorch replacements
 
-- `rotate_prev_bev` is currently a no-op in `PerceptionTransformerLite.get_bev_features`.
-- This implementation focuses on clear forward-path mechanics and shape transparency, not kernel-level optimization.
-- Deformable attention uses pure PyTorch `grid_sample` instead of custom CUDA ops.
-
-These simplifications are useful for study because they keep BEVFormer concepts explicit.
+- Behavioral parity is pinned to the frozen BEVFormer anchors in `study/markdown/strict_parity_anchor_manifest.md`.
+- Temporal BEV update keeps upstream shift + rotation semantics; previous no-op rotation behavior is removed.
+- Deformable/CUDA attention kernels are replaced by explicit PyTorch tensor sampling and weighted aggregation while preserving tensor contracts.
+- Decode follows NMS-free top-k ordering and post-center filtering semantics aligned with upstream.

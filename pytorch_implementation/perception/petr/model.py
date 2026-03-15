@@ -9,6 +9,7 @@ from .backbone_neck import BackboneNeck
 from .config import PETRForwardConfig
 from .head import PETRHeadLite
 from .transformer import PETRTransformerDecoderLite, PETRTransformerLite
+from .utils import validate_petr_img_metas
 
 
 class PETRLite(nn.Module):
@@ -29,12 +30,16 @@ class PETRLite(nn.Module):
         transformer = PETRTransformerLite(decoder=decoder)
         self.head = PETRHeadLite(cfg, transformer)
 
-    def extract_img_feat(self, img: torch.Tensor) -> list[torch.Tensor]:
+    def extract_img_feat(self, img: torch.Tensor, img_metas: list[dict]) -> list[torch.Tensor]:
         """Extract multiscale camera features from [B, Ncam, 3, H, W]."""
 
         if img.dim() != 5:
             raise ValueError(f"Expected image shape [B, Ncam, 3, H, W], got {tuple(img.shape)}")
         batch_size, num_cams, channels, height, width = img.shape
+        validate_petr_img_metas(img_metas, batch_size=batch_size, num_cams=num_cams)
+        for meta in img_metas:
+            meta["input_shape"] = (height, width)
+
         img_flat = img.reshape(batch_size * num_cams, channels, height, width)
         feats = self.backbone_neck(img_flat)
         return [feat.view(batch_size, num_cams, feat.shape[1], feat.shape[2], feat.shape[3]) for feat in feats]
@@ -46,7 +51,9 @@ class PETRLite(nn.Module):
         *,
         decode: bool = False,
     ) -> dict[str, torch.Tensor] | dict[str, object]:
-        img_feats = self.extract_img_feat(img)
+        if not isinstance(img_metas, list):
+            raise TypeError(f"img_metas must be a list, got {type(img_metas)}.")
+        img_feats = self.extract_img_feat(img, img_metas)
         outputs = self.head(img_feats, img_metas)
         if decode:
             return {"preds": outputs, "decoded": self.head.get_bboxes(outputs)}
