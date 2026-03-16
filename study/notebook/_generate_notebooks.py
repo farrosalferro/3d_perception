@@ -54,10 +54,23 @@ def _split_markdown_sections(text):
     return chunks
 
 
+def _normalize_display_math_delimiters(text: str) -> str:
+    """Normalize display math delimiters for notebook markdown rendering.
+
+    Some notebook renderers reliably support `$$ ... $$` but not `\\[ ... \\]`.
+    Convert standalone display-math delimiter lines to `$$` while preserving
+    inline LaTeX commands.
+    """
+
+    text = re.sub(r"(?m)^\\\[\s*$", "$$", text)
+    text = re.sub(r"(?m)^\\\]\s*$", "$$", text)
+    return text
+
+
 def _read_markdown(model_name: str) -> str:
     path = os.path.join(MD_DIR, f"{model_name}_paper_to_code.md")
     with open(path) as fh:
-        return fh.read()
+        return _normalize_display_math_delimiters(fh.read())
 
 
 def _write_notebook(model_name: str, nb: nbf.NotebookNode) -> str:
@@ -2421,6 +2434,337 @@ def _make_prediction_vip3d_notebook():
 
 
 # ---------------------------------------------------------------------------
+# Planning notebooks
+# ---------------------------------------------------------------------------
+
+def _make_planning_notebook(
+    *,
+    model_key: str,
+    import_module: str,
+    model_class: str,
+    config_call: str,
+    chunk_code: dict[int, str],
+    hook_lines: list[str],
+) -> nbf.NotebookNode:
+    nb = _new_notebook()
+    md = _read_markdown(model_key)
+
+    preamble = f"""\
+        import sys, os
+        sys.path.insert(0, os.path.abspath("../.."))
+
+        import torch
+        from pytorch_implementation.planning.{import_module}.config import debug_forward_config
+        from pytorch_implementation.planning.{import_module}.model import {model_class}
+        from pytorch_implementation.planning.common.debug import build_debug_batch
+
+        cfg = {config_call}
+        model = {model_class}(cfg).eval()
+        batch = build_debug_batch(cfg.e2e, batch_size=2)
+
+        print(f"Model: {{type(model).__name__}}")
+        print(f"Config: {{cfg.name}}")
+        print(f"ego_history: {{tuple(batch.ego_history.shape)}}")
+        print(f"agent_states: {{tuple(batch.agent_states.shape)}}")
+        print(f"map_polylines: {{tuple(batch.map_polylines.shape)}}")
+    """
+    nb.cells.append(code_cell(preamble))
+    nb.cells.append(code_cell_raw(COMMON_HELPERS))
+
+    _append_markdown_sections_with_chunks(nb, md, chunk_code)
+
+    nb.cells.append(
+        code_cell(
+            _build_final_finite_check_cell(
+                hook_lines=hook_lines,
+                forward_lines=[
+                    "outputs = model(",
+                    "    ego_history=batch.ego_history,",
+                    "    agent_states=batch.agent_states,",
+                    "    map_polylines=batch.map_polylines,",
+                    "    route_features=batch.route_features,",
+                    ")",
+                ],
+            )
+        )
+    )
+    return nb
+
+
+PLANNING_UNIAD_CHUNKS = {
+    0: """\
+        # Chunk 0: End-to-end planning forward
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+
+        print("=== planning/uniad output shapes ===")
+        for key, val in outputs.items():
+            if torch.is_tensor(val):
+                print(f"  {key}: {tuple(val.shape)}")
+
+        gather_idx = outputs["selected_index"].unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand(
+            -1, 1, cfg.e2e.future_steps, 2
+        )
+        expected = outputs["candidate_trajectories"].gather(dim=1, index=gather_idx).squeeze(1)
+        assert torch.allclose(outputs["selected_trajectory"], expected, atol=1e-5)
+        print("selection contract check passed.")
+    """,
+    1: """\
+        # Chunk 1: Scene encoding
+        capture, handles = {}, []
+        _register_hook(model.scene_encoder.ego_proj, "scene.ego_proj", capture, handles)
+        _register_hook(model.scene_encoder.ego_gru, "scene.ego_gru", capture, handles)
+        _register_hook(model.scene_encoder.agent_proj, "scene.agent_proj", capture, handles)
+        _register_hook(model.scene_encoder.map_point_proj, "scene.map_point_proj", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+        for h in handles:
+            h.remove()
+
+        print("=== scene encoding ===")
+        _print_shape("scene.ego_proj", capture["scene.ego_proj"])
+        _print_shape("scene.ego_gru", capture["scene.ego_gru"])
+        _print_shape("scene.agent_proj", capture["scene.agent_proj"])
+        _print_shape("scene.map_point_proj", capture["scene.map_point_proj"])
+        _print_shape("scene_tokens", outputs["scene_tokens"])
+    """,
+    2: """\
+        # Chunk 2: Query planning decoder
+        capture, handles = {}, []
+        _register_hook(model.planning_decoder.cross_attn, "decoder.cross_attn", capture, handles)
+        _register_hook(model.candidate_head.delta_head, "head.delta_head", capture, handles)
+        _register_hook(model.candidate_head.logit_head, "head.logit_head", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+        for h in handles:
+            h.remove()
+
+        print("=== planning decoder ===")
+        _print_shape("decoder.cross_attn", capture["decoder.cross_attn"])
+        _print_shape("head.delta_head", capture["head.delta_head"])
+        _print_shape("head.logit_head", capture["head.logit_head"])
+        _print_shape("candidate_trajectories", outputs["candidate_trajectories"])
+    """,
+    3: """\
+        # Chunk 3: Kinematics and safety
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+
+        feasible_ratio = outputs["feasible_mask"].float().mean().item()
+        collision_free_ratio = outputs["collision_free_mask"].float().mean().item()
+        print({"feasible_ratio": feasible_ratio, "collision_free_ratio": collision_free_ratio})
+        assert torch.equal(outputs["collision_free_mask"], outputs["min_distance"] >= cfg.e2e.safety_margin)
+        print("kinematic/safety contract check passed.")
+    """,
+}
+
+
+PLANNING_VAD_CHUNKS = {
+    0: """\
+        # Chunk 0: End-to-end planning forward
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+
+        print("=== planning/vad output shapes ===")
+        for key, val in outputs.items():
+            if torch.is_tensor(val):
+                print(f"  {key}: {tuple(val.shape)}")
+    """,
+    1: """\
+        # Chunk 1: Vector encoding
+        capture, handles = {}, []
+        _register_hook(model.vector_encoder.ego_proj, "vector.ego_proj", capture, handles)
+        _register_hook(model.vector_encoder.agent_proj, "vector.agent_proj", capture, handles)
+        _register_hook(model.vector_encoder.map_point_proj, "vector.map_point_proj", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+        for h in handles:
+            h.remove()
+
+        print("=== vector encoding ===")
+        _print_shape("vector.ego_proj", capture["vector.ego_proj"])
+        _print_shape("vector.agent_proj", capture["vector.agent_proj"])
+        _print_shape("vector.map_point_proj", capture["vector.map_point_proj"])
+        _print_shape("vector_tokens", outputs["vector_tokens"])
+    """,
+    2: """\
+        # Chunk 2: Vectorized planning core
+        capture, handles = {}, []
+        _register_hook(model.planner_core.cross_attn, "planner.cross_attn", capture, handles)
+        _register_hook(model.planner_core.traj_head, "planner.traj_head", capture, handles)
+        _register_hook(model.planner_core.score_head, "planner.score_head", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+        for h in handles:
+            h.remove()
+
+        print("=== planning core ===")
+        _print_shape("planner.cross_attn", capture["planner.cross_attn"])
+        _print_shape("planner.traj_head", capture["planner.traj_head"])
+        _print_shape("planner.score_head", capture["planner.score_head"])
+        _print_shape("candidate_trajectories", outputs["candidate_trajectories"])
+    """,
+    3: """\
+        # Chunk 3: Constraint composition
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+
+        lane_tolerance = cfg.e2e.safety_margin * 3.0
+        lane_mask = outputs["lane_distance"] <= lane_tolerance
+        lane_align_mask = outputs["lane_alignment"] >= 0.0
+        assert torch.all((~outputs["feasible_mask"]) | lane_mask)
+        assert torch.all((~outputs["feasible_mask"]) | lane_align_mask)
+        print("lane and alignment constraints verified.")
+    """,
+}
+
+
+PLANNING_GAMEFORMER_CHUNKS = {
+    0: """\
+        # Chunk 0: End-to-end interactive planning
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+
+        print("=== planning/gameformer output shapes ===")
+        for key, val in outputs.items():
+            if torch.is_tensor(val):
+                print(f"  {key}: {tuple(val.shape)}")
+    """,
+    1: """\
+        # Chunk 1: Scene encoding
+        capture, handles = {}, []
+        _register_hook(model.scene_encoder.ego_proj, "scene.ego_proj", capture, handles)
+        _register_hook(model.scene_encoder.ego_gru, "scene.ego_gru", capture, handles)
+        _register_hook(model.scene_encoder.agent_proj, "scene.agent_proj", capture, handles)
+        _register_hook(model.scene_encoder.map_point_proj, "scene.map_point_proj", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+        for h in handles:
+            h.remove()
+
+        print("=== scene encoding ===")
+        _print_shape("scene.ego_proj", capture["scene.ego_proj"])
+        _print_shape("scene.ego_gru", capture["scene.ego_gru"])
+        _print_shape("scene.agent_proj", capture["scene.agent_proj"])
+        _print_shape("scene.map_point_proj", capture["scene.map_point_proj"])
+        _print_shape("level_ego_tokens", outputs["level_ego_tokens"])
+    """,
+    2: """\
+        # Chunk 2: Multi-level interaction
+        capture, handles = {}, []
+        _register_hook(model.interaction_layers[0].ego_attn, "interaction.0.ego_attn", capture, handles)
+        _register_hook(model.interaction_layers[0].agent_attn, "interaction.0.agent_attn", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+        for h in handles:
+            h.remove()
+
+        print("=== interaction level 0 ===")
+        _print_shape("interaction.0.ego_attn", capture["interaction.0.ego_attn"])
+        _print_shape("interaction.0.agent_attn", capture["interaction.0.agent_attn"])
+        _print_shape("level_agent_tokens", outputs["level_agent_tokens"])
+    """,
+    3: """\
+        # Chunk 3: Candidate and agent-future decoding
+        capture, handles = {}, []
+        _register_hook(model.candidate_delta_head, "head.candidate_delta", capture, handles)
+        _register_hook(model.candidate_score_head, "head.candidate_score", capture, handles)
+        _register_hook(model.agent_delta_head, "head.agent_delta", capture, handles)
+
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+        for h in handles:
+            h.remove()
+
+        print("=== decoder heads ===")
+        _print_shape("head.candidate_delta", capture["head.candidate_delta"])
+        _print_shape("head.candidate_score", capture["head.candidate_score"])
+        _print_shape("head.agent_delta", capture["head.agent_delta"])
+        _print_shape("agent_future", outputs["agent_future"])
+    """,
+    4: """\
+        # Chunk 4: Kinematic + interactive safety checks
+        with torch.no_grad():
+            outputs = model(
+                ego_history=batch.ego_history,
+                agent_states=batch.agent_states,
+                map_polylines=batch.map_polylines,
+                route_features=batch.route_features,
+            )
+
+        assert torch.equal(outputs["collision_free_mask"], outputs["min_distance"] >= cfg.e2e.safety_margin)
+        print("interactive safety contract check passed.")
+    """,
+}
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -2431,19 +2775,19 @@ def main() -> None:
     nb = _make_petr_notebook()
     path = _write_notebook("perception/petr", nb)
     generated.append(path)
-    print(f"[1/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[1/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # BEVFormer
     nb = _make_bevformer_notebook()
     path = _write_notebook("perception/bevformer", nb)
     generated.append(path)
-    print(f"[2/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[2/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # MapTR
     nb = _make_maptr_notebook()
     path = _write_notebook("perception/maptr", nb)
     generated.append(path)
-    print(f"[3/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[3/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # FB-BEV
     nb = _make_simple_notebook(
@@ -2453,7 +2797,7 @@ def main() -> None:
     )
     path = _write_notebook("perception/fbbev", nb)
     generated.append(path)
-    print(f"[4/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[4/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # PolarFormer
     nb = _make_simple_notebook(
@@ -2463,7 +2807,7 @@ def main() -> None:
     )
     path = _write_notebook("perception/polarformer", nb)
     generated.append(path)
-    print(f"[5/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[5/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # Sparse4D
     nb = _make_simple_notebook(
@@ -2473,7 +2817,7 @@ def main() -> None:
     )
     path = _write_notebook("perception/sparse4d", nb)
     generated.append(path)
-    print(f"[6/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[6/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # StreamPETR
     nb = _make_simple_notebook(
@@ -2483,31 +2827,95 @@ def main() -> None:
     )
     path = _write_notebook("perception/streampetr", nb)
     generated.append(path)
-    print(f"[7/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[7/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # prediction/surroundocc
     nb = _make_prediction_surroundocc_notebook()
     path = _write_notebook("prediction/surroundocc", nb)
     generated.append(path)
-    print(f"[8/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[8/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # prediction/beverse
     nb = _make_prediction_beverse_notebook()
     path = _write_notebook("prediction/beverse", nb)
     generated.append(path)
-    print(f"[9/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[9/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # prediction/flashocc
     nb = _make_prediction_flashocc_notebook()
     path = _write_notebook("prediction/flashocc", nb)
     generated.append(path)
-    print(f"[10/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[10/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     # prediction/vip3d
     nb = _make_prediction_vip3d_notebook()
     path = _write_notebook("prediction/vip3d", nb)
     generated.append(path)
-    print(f"[11/11] Generated: {path}  ({len(nb.cells)} cells)")
+    print(f"[11/14] Generated: {path}  ({len(nb.cells)} cells)")
+
+    # planning/uniad
+    nb = _make_planning_notebook(
+        model_key="planning/uniad",
+        import_module="uniad",
+        model_class="UniADLite",
+        config_call="debug_forward_config()",
+        chunk_code=PLANNING_UNIAD_CHUNKS,
+        hook_lines=[
+            '_register_hook(model.scene_encoder.ego_proj, "scene.ego_proj", capture, handles)',
+            '_register_hook(model.scene_encoder.ego_gru, "scene.ego_gru", capture, handles)',
+            '_register_hook(model.scene_encoder.agent_proj, "scene.agent_proj", capture, handles)',
+            '_register_hook(model.scene_encoder.map_point_proj, "scene.map_point_proj", capture, handles)',
+            '_register_hook(model.planning_decoder.cross_attn, "decoder.cross_attn", capture, handles)',
+            '_register_hook(model.candidate_head.delta_head, "head.delta_head", capture, handles)',
+            '_register_hook(model.candidate_head.logit_head, "head.logit_head", capture, handles)',
+        ],
+    )
+    path = _write_notebook("planning/uniad", nb)
+    generated.append(path)
+    print(f"[12/14] Generated: {path}  ({len(nb.cells)} cells)")
+
+    # planning/vad
+    nb = _make_planning_notebook(
+        model_key="planning/vad",
+        import_module="vad",
+        model_class="VADLite",
+        config_call="debug_forward_config()",
+        chunk_code=PLANNING_VAD_CHUNKS,
+        hook_lines=[
+            '_register_hook(model.vector_encoder.ego_proj, "vector.ego_proj", capture, handles)',
+            '_register_hook(model.vector_encoder.agent_proj, "vector.agent_proj", capture, handles)',
+            '_register_hook(model.vector_encoder.map_point_proj, "vector.map_point_proj", capture, handles)',
+            '_register_hook(model.planner_core.cross_attn, "planner.cross_attn", capture, handles)',
+            '_register_hook(model.planner_core.traj_head, "planner.traj_head", capture, handles)',
+            '_register_hook(model.planner_core.score_head, "planner.score_head", capture, handles)',
+        ],
+    )
+    path = _write_notebook("planning/vad", nb)
+    generated.append(path)
+    print(f"[13/14] Generated: {path}  ({len(nb.cells)} cells)")
+
+    # planning/gameformer
+    nb = _make_planning_notebook(
+        model_key="planning/gameformer",
+        import_module="gameformer",
+        model_class="GameFormerLite",
+        config_call="debug_forward_config()",
+        chunk_code=PLANNING_GAMEFORMER_CHUNKS,
+        hook_lines=[
+            '_register_hook(model.scene_encoder.ego_proj, "scene.ego_proj", capture, handles)',
+            '_register_hook(model.scene_encoder.ego_gru, "scene.ego_gru", capture, handles)',
+            '_register_hook(model.scene_encoder.agent_proj, "scene.agent_proj", capture, handles)',
+            '_register_hook(model.scene_encoder.map_point_proj, "scene.map_point_proj", capture, handles)',
+            '_register_hook(model.interaction_layers[0].ego_attn, "interaction.0.ego_attn", capture, handles)',
+            '_register_hook(model.interaction_layers[0].agent_attn, "interaction.0.agent_attn", capture, handles)',
+            '_register_hook(model.candidate_delta_head, "head.candidate_delta", capture, handles)',
+            '_register_hook(model.candidate_score_head, "head.candidate_score", capture, handles)',
+            '_register_hook(model.agent_delta_head, "head.agent_delta", capture, handles)',
+        ],
+    )
+    path = _write_notebook("planning/gameformer", nb)
+    generated.append(path)
+    print(f"[14/14] Generated: {path}  ({len(nb.cells)} cells)")
 
     print(f"\nAll {len(generated)} notebooks generated in {NB_DIR}")
 
